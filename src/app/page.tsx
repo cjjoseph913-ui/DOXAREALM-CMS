@@ -274,7 +274,24 @@ function Directory() {
   const [search, setSearch] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number|null>(null);
-  const emptyForm = { name: '', email: '', phone: '', gender: 'Male', ageRange: '18-25', maritalStatus: 'Single', occupation: '', address: '', city: '', waterBaptismStatus: 'Not Baptized', waterBaptismDate: '', waterBaptismLocation: '', waterBaptismBy: '', waterBaptismCertificate: '', holySpiritBaptismStatus: 'Not Baptized', holySpiritBaptismDate: '', holySpiritEvidence: '', holySpiritNotes: '', churchId: '', zoneId: '', cellGroupId: '', status: 'Active', conversionDate: '', membershipDate: '', emergencyContact: '', emergencyPhone: '' };
+    const departmentsList = [
+    'Member / Muumini Wa Kawaida',
+    'Senior Pastor',
+    'Pastor',
+    'Katibu Mkoa',
+    'Katibu Msaidizi',
+    'Mtawala',
+    'Mhazina',
+    'Kiongozi Wa Kiroho',
+    'Msaidizi Kiongozi Wa Kiroho',
+    'M/kiti Jamii',
+    'Itifaki',
+    'Askofu (Bishop)',
+    'Cell Leader',
+    'M/kiti Maendeleo',
+    'M/kiti Mali Za Kanisa'
+  ];
+  const emptyForm = { name: '', email: '', phone: '', gender: 'Male', ageRange: '18-25', maritalStatus: 'Single', occupation: '', address: '', city: '', waterBaptismStatus: 'Not Baptized', waterBaptismDate: '', waterBaptismLocation: '', waterBaptismBy: '', waterBaptismCertificate: '', holySpiritBaptismStatus: 'Not Baptized', holySpiritBaptismDate: '', holySpiritEvidence: '', holySpiritNotes: '', churchId: '', zoneId: '', cellGroupId: '', department: 'Member / Muumini Wa Kawaida', leadershipRole: 'Member / Muumini Wa Kawaida', status: 'Active', conversionDate: '', membershipDate: '', emergencyContact: '', emergencyPhone: '' };
   const [form, setForm] = useState<any>(emptyForm);
 
   const filteredMembers = db.members.filter((m:any)=> m.name?.toLowerCase().includes(search.toLowerCase()) || m.email?.toLowerCase().includes(search.toLowerCase()));
@@ -287,7 +304,7 @@ function Directory() {
       name: m.name || '', email: m.email || '', phone: m.phone || '', gender: m.gender || 'Male', ageRange: m.ageRange || '18-25', maritalStatus: m.maritalStatus || 'Single', occupation: m.occupation || '', address: m.address || '', city: m.city || '',
       waterBaptismStatus: m.waterBaptismStatus || 'Not Baptized', waterBaptismDate: toDate(m.waterBaptismDate), waterBaptismLocation: m.waterBaptismLocation || '', waterBaptismBy: m.waterBaptismBy || '', waterBaptismCertificate: m.waterBaptismCertificate || '',
       holySpiritBaptismStatus: m.holySpiritBaptismStatus || 'Not Baptized', holySpiritBaptismDate: toDate(m.holySpiritBaptismDate), holySpiritEvidence: m.holySpiritEvidence || '', holySpiritNotes: m.holySpiritNotes || '',
-      churchId: m.churchId ? String(m.churchId) : '', zoneId: m.zoneId ? String(m.zoneId) : '', cellGroupId: m.cellGroupId ? String(m.cellGroupId) : '', status: m.status || 'Active', conversionDate: toDate(m.conversionDate), membershipDate: toDate(m.membershipDate), emergencyContact: m.emergencyContact || '', emergencyPhone: m.emergencyPhone || ''
+      churchId: m.churchId ? String(m.churchId) : '', zoneId: m.zoneId ? String(m.zoneId) : '', cellGroupId: m.cellGroupId ? String(m.cellGroupId) : '', department: m.department || m.leadershipRole || 'Member / Muumini Wa Kawaida', leadershipRole: m.leadershipRole || m.department || 'Member / Muumini Wa Kawaida', status: m.status || 'Active', conversionDate: toDate(m.conversionDate), membershipDate: toDate(m.membershipDate), emergencyContact: m.emergencyContact || '', emergencyPhone: m.emergencyPhone || ''
     });
     setEditingId(m.id);
     setShowForm(true);
@@ -304,6 +321,8 @@ function Directory() {
       waterBaptismDate: form.waterBaptismDate ? new Date(form.waterBaptismDate).toISOString() : null,
       holySpiritBaptismDate: form.holySpiritBaptismDate ? new Date(form.holySpiritBaptismDate).toISOString() : null,
       conversionDate: form.conversionDate ? new Date(form.conversionDate).toISOString() : null,
+      department: form.department,
+      leadershipRole: form.department,
       membershipDate: form.membershipDate ? new Date(form.membershipDate).toISOString() : (editingId ? null : new Date().toISOString()),
     };
     try {
@@ -341,7 +360,7 @@ function Directory() {
         <div className="overflow-x-auto">
           <table className="w-full text-sm text-left">
             <thead><tr className="border-b border-slate-800/60 text-slate-500 text-xs uppercase tracking-wider">
-              <th className="px-4 py-3">Name</th><th className="px-4 py-3">Contact</th><th className="px-4 py-3">Church / Cell</th><th className="px-4 py-3">Water Baptism</th><th className="px-4 py-3">Holy Spirit</th><th className="px-4 py-3">Status</th><th className="px-4 py-3 text-right">Actions</th>
+              <th className="px-4 py-3">Name</th><th className="px-4 py-3">Contact</th><th className="px-4 py-3">Church / Cell</th><th className="px-4 py-3">Dept / Leadership</th><th className="px-4 py-3">Water Baptism</th><th className="px-4 py-3">Holy Spirit</th><th className="px-4 py-3">Status</th><th className="px-4 py-3 text-right">Actions</th>
             </tr></thead>
             <tbody>
               {filteredMembers.length>0 ? filteredMembers.map((m:any,i:number)=>{
@@ -358,7 +377,7 @@ function Directory() {
                     <td className="px-4 py-3 text-right"><Button variant="ghost" size="xs" icon={Edit3} onClick={()=>startEdit(m)}>Edit</Button></td>
                   </tr>
                 );
-              }) : <tr><td colSpan={7} className="px-4 py-12 text-center text-slate-600">No members found. Register your first member.</td></tr>}
+              }) : <tr><td colSpan={8} className="px-4 py-12 text-center text-slate-600">No members found. Register your first member.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -386,6 +405,7 @@ function Directory() {
           <div>
             <h3 className="text-sm font-semibold text-slate-200 flex items-center gap-2 mb-3"><Building2 className="w-4 h-4 text-emerald-400" /> Church Affiliation</h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-slate-800/30 rounded-xl border border-slate-700/40">
+              <Select label="Department / Leadership Role *" options={departmentsList} value={form.department} onChange={(e:any)=>setForm({...form, department: e.target.value, leadershipRole: e.target.value})} required />
               <Select label="Church" options={[{value:'',label:'— Select Church —'}, ...db.churches.map((c:any)=>({value:c.id, label:c.name}))]} value={form.churchId} onChange={(e:any)=>setForm({...form,churchId:e.target.value, zoneId:'', cellGroupId:''})} />
               <Select label="Zone" options={[{value:'',label:'— Select Zone —'}, ...zonesFiltered.map((z:any)=>({value:z.id, label:z.name}))]} value={form.zoneId} onChange={(e:any)=>setForm({...form,zoneId:e.target.value, cellGroupId:''})} />
               <Select label="Cell Group" options={[{value:'',label:'— Select Cell —'}, ...cellsFiltered.map((c:any)=>({value:c.id, label:c.name}))]} value={form.cellGroupId} onChange={(e:any)=>setForm({...form,cellGroupId:e.target.value})} />

@@ -27,6 +27,8 @@ export const members = pgTable("members", {
   zoneId: integer("zone_id"),
   cellGroupId: integer("cell_group_id"),
   departmentId: integer("department_id"),
+  department: text("department").default("Member"),
+  leadershipRole: text("leadership_role").default("Member"),
   status: text("status").default("Active"),
   conversionDate: timestamp("conversion_date"),
   membershipDate: timestamp("membership_date"),
