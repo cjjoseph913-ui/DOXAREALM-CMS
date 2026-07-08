@@ -81,7 +81,8 @@ const AppContext = createContext<any>(null);
 function AppProvider({ children }: { children: React.ReactNode }) {
   const [db, setDb] = useState<any>({
     members: [], visitors: [], converts: [], churches: [], zones: [], cellGroups: [],
-    attendanceLogs: [], communicationLogs: [], auditLogs: [], stewardshipSettings: { baseCurrency: 'USD', monthlyCellTarget: 20, titheGoalPercentage: 10, customZones: [] }, documents: []
+    attendanceLogs: [], communicationLogs: [], auditLogs: [], stewardshipSettings: { baseCurrency: 'USD', monthlyCellTarget: 20, titheGoalPercentage: 10, customZones: [] }, documents: [],
+    regionNotices: [], todoTasks: []
   });
   const [loading, setLoading] = useState(true);
   const offline = useOfflineQueue();
@@ -96,9 +97,10 @@ function AppProvider({ children }: { children: React.ReactNode }) {
   const fetchAll = useCallback(async () => {
     try {
       setLoading(true);
-      const [members, visitors, converts, churches, zones, cellGroups, attendanceLogs, communicationLogs, auditLogs, stewardshipSettings, documents] = await Promise.all([
+      const [members, visitors, converts, churches, zones, cellGroups, attendanceLogs, communicationLogs, auditLogs, stewardshipSettings, documents, regionNotices, todoTasks] = await Promise.all([
         apiFetch('/members'), apiFetch('/visitors'), apiFetch('/converts'), apiFetch('/churches'), apiFetch('/zones'), apiFetch('/cell-groups'),
-        apiFetch('/attendance-logs'), apiFetch('/communication-logs'), apiFetch('/audit-logs'), apiFetch('/stewardship-settings'), apiFetch('/documents')
+        apiFetch('/attendance-logs'), apiFetch('/communication-logs'), apiFetch('/audit-logs'), apiFetch('/stewardship-settings'), apiFetch('/documents'),
+        apiFetch('/region-notices'), apiFetch('/todo-tasks')
       ]);
       setDb({
         members: Array.isArray(members) ? members : [], 
@@ -111,7 +113,9 @@ function AppProvider({ children }: { children: React.ReactNode }) {
         communicationLogs: Array.isArray(communicationLogs) ? communicationLogs : [],
         auditLogs: Array.isArray(auditLogs) ? auditLogs : [], 
         stewardshipSettings: stewardshipSettings || { baseCurrency: 'USD', monthlyCellTarget: 20, titheGoalPercentage: 10, customZones: [] }, 
-        documents: Array.isArray(documents) ? documents : []
+        documents: Array.isArray(documents) ? documents : [],
+        regionNotices: Array.isArray(regionNotices) ? regionNotices : [],
+        todoTasks: Array.isArray(todoTasks) ? todoTasks : []
       });
     } catch (e: any) {
       showToast('Failed to load: ' + e.message, 'error');
@@ -1466,6 +1470,177 @@ function CommunicationsHub() {
   );
 }
 
+// ─── STANDALONE TO-DO LIST PAGE ───────────────────────────────────────────
+function TodoListPage() {
+  const { db, showToast, apiFetch, refresh } = useApp();
+  const { todoTasks, churches } = db;
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [filter, setFilter] = useState('All');
+  const emptyForm = { task: '', assignedTo: 'All Leaders', priority: 'Medium', dueDate: new Date().toISOString().split('T')[0], status: 'Pending', churchId: '', notes: '' };
+  const [form, setForm] = useState<any>(emptyForm);
+
+  const filtered = (todoTasks || []).filter((t: any) => {
+    if (filter === 'All') return true;
+    if (filter === 'Active') return t.status !== 'Completed';
+    if (filter === 'Completed') return t.status === 'Completed';
+    return true;
+  }).sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+  const stats = {
+    total: todoTasks?.length || 0,
+    pending: todoTasks?.filter((t: any) => t.status === 'Pending').length || 0,
+    inProgress: todoTasks?.filter((t: any) => t.status === 'In Progress').length || 0,
+    completed: todoTasks?.filter((t: any) => t.status === 'Completed').length || 0,
+  };
+
+  const handleSubmit = async (e: any) => {
+    e.preventDefault();
+    if (!form.task) { showToast('Task is required', 'error'); return; }
+    const payload = {
+      ...form,
+      churchId: form.churchId ? parseInt(form.churchId) : null,
+      dueDate: form.dueDate ? new Date(form.dueDate).toISOString() : null,
+      updatedAt: new Date().toISOString()
+    };
+    try {
+      if (editingId) {
+        await apiFetch(`/todo-tasks/${editingId}`, { method: 'PUT', body: JSON.stringify(payload) });
+        showToast('Task updated', 'success');
+      } else {
+        await apiFetch('/todo-tasks', { method: 'POST', body: JSON.stringify(payload) });
+        await apiFetch('/audit-logs', { method: 'POST', body: JSON.stringify({ action: 'todo_created', details: `Task: ${form.task}`, timestamp: new Date().toISOString() }) });
+        showToast('Task created', 'success');
+      }
+      setShowForm(false);
+      setEditingId(null);
+      setForm(emptyForm);
+      refresh();
+    } catch (err: any) { showToast(err.message, 'error'); }
+  };
+
+  const startEdit = (t: any) => {
+    setForm({
+      task: t.task || '',
+      assignedTo: t.assignedTo || 'All Leaders',
+      priority: t.priority || 'Medium',
+      dueDate: t.dueDate ? new Date(t.dueDate).toISOString().split('T')[0] : '',
+      status: t.status || 'Pending',
+      churchId: t.churchId ? String(t.churchId) : '',
+      notes: t.notes || ''
+    });
+    setEditingId(t.id);
+    setShowForm(true);
+  };
+
+  const toggleStatus = async (task: any) => {
+    const next = task.status === 'Pending' ? 'In Progress' : task.status === 'In Progress' ? 'Completed' : 'Pending';
+    try {
+      await apiFetch(`/todo-tasks/${task.id}`, { method: 'PUT', body: JSON.stringify({ ...task, status: next, updatedAt: new Date().toISOString() }) });
+      showToast(`Task → ${next}`, 'success');
+      refresh();
+    } catch (err: any) { showToast(err.message, 'error'); }
+  };
+
+  const deleteTask = async (id: number) => {
+    if (!confirm('Delete this task?')) return;
+    try { await apiFetch(`/todo-tasks/${id}`, { method: 'DELETE' }); showToast('Deleted', 'success'); refresh(); } catch (err: any) { showToast(err.message, 'error'); }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-100 flex items-center gap-3"><ListTodo className="w-6 h-6 text-amber-400" /> To-Do List &amp; Task Manager</h1>
+          <p className="text-sm text-slate-500 mt-1">Create, assign, track, and complete execution tasks across all churches</p>
+        </div>
+        <Button icon={Plus} variant="primary" onClick={() => { setEditingId(null); setForm(emptyForm); setShowForm(true); }}>Add New Task</Button>
+      </div>
+
+      {/* Stats Banner */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <Card><CardContent className="text-center"><p className="text-xs text-slate-500">TOTAL</p><p className="text-2xl font-bold text-slate-100">{stats.total}</p></CardContent></Card>
+        <Card><CardContent className="text-center"><p className="text-xs text-slate-500">PENDING</p><p className="text-2xl font-bold text-amber-400">{stats.pending}</p></CardContent></Card>
+        <Card><CardContent className="text-center"><p className="text-xs text-slate-500">IN PROGRESS</p><p className="text-2xl font-bold text-indigo-400">{stats.inProgress}</p></CardContent></Card>
+        <Card><CardContent className="text-center"><p className="text-xs text-slate-500">COMPLETED</p><p className="text-2xl font-bold text-emerald-400">{stats.completed}</p></CardContent></Card>
+      </div>
+
+      {/* Filter Buttons */}
+      <div className="flex gap-2">
+        {['All', 'Active', 'Completed'].map((f: string) => (
+          <button key={f} onClick={() => setFilter(f)} className={`px-4 py-1.5 rounded-lg text-xs font-medium transition ${filter === f ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-slate-200'}`}>{f} ({f === 'All' ? stats.total : f === 'Active' ? stats.pending + stats.inProgress : stats.completed})</button>
+        ))}
+      </div>
+
+      {/* Add/Edit Form */}
+      {showForm && (
+        <Card className="border-amber-700/40 bg-amber-950/10">
+          <CardHeader><h3 className="text-sm font-semibold">{editingId ? 'Edit Task' : 'Create New Task'}</h3></CardHeader>
+          <CardContent>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <Input label="Task Description *" value={form.task} onChange={(e: any) => setForm({ ...form, task: e.target.value })} required placeholder="What needs to be done?" />
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <Input label="Assigned To" value={form.assignedTo} onChange={(e: any) => setForm({ ...form, assignedTo: e.target.value })} placeholder="Person or role" />
+                <Select label="Priority" options={['Low', 'Medium', 'High']} value={form.priority} onChange={(e: any) => setForm({ ...form, priority: e.target.value })} />
+                <Input label="Due Date" type="date" value={form.dueDate} onChange={(e: any) => setForm({ ...form, dueDate: e.target.value })} />
+                <Select label="Status" options={['Pending', 'In Progress', 'Completed']} value={form.status} onChange={(e: any) => setForm({ ...form, status: e.target.value })} />
+                <Select label="Church (optional)" options={[{ value: '', label: '— All Churches —' }, ...churches.map((c: any) => ({ value: c.id, label: c.name }))]} value={form.churchId} onChange={(e: any) => setForm({ ...form, churchId: e.target.value })} />
+              </div>
+              <Textarea label="Notes / Instructions" value={form.notes} onChange={(e: any) => setForm({ ...form, notes: e.target.value })} placeholder="Additional details..." />
+              <div className="flex justify-end gap-3">
+                <Button type="button" variant="ghost" onClick={() => { setShowForm(false); setEditingId(null); setForm(emptyForm); }}>Cancel</Button>
+                <Button type="submit" icon={Save}>{editingId ? 'Update Task' : 'Save Task'}</Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Task Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {filtered.length > 0 ? filtered.map((task: any) => {
+          const ch = churches.find((c: any) => c.id === task.churchId);
+          const isDone = task.status === 'Completed';
+          const isProg = task.status === 'In Progress';
+          return (
+            <Card key={task.id} className={`transition-all ${isDone ? 'opacity-60 border-emerald-800/40' : isProg ? 'border-amber-500/60' : ''}`}>
+              <CardContent className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <Badge variant={isDone ? 'success' : isProg ? 'warning' : 'default'}>{task.status}</Badge>
+                  <Badge variant={task.priority === 'High' ? 'danger' : task.priority === 'Medium' ? 'warning' : 'info'}>{task.priority}</Badge>
+                </div>
+                <div className="flex items-start gap-3">
+                  <button onClick={() => toggleStatus(task)} className={`mt-0.5 p-1.5 rounded-lg transition cursor-pointer flex-shrink-0 ${isDone ? 'bg-emerald-500 text-white' : isProg ? 'bg-amber-400 text-slate-950' : 'bg-slate-800 text-slate-400 hover:text-white'}`}>
+                    <Check className="w-4 h-4" />
+                  </button>
+                  <div className="flex-1 min-w-0">
+                    <h4 className={`text-sm font-semibold ${isDone ? 'line-through text-slate-500' : 'text-slate-100'}`}>{task.task}</h4>
+                    <p className="text-xs text-indigo-300 mt-0.5">→ {task.assignedTo || 'Unassigned'}</p>
+                  </div>
+                </div>
+                {task.notes && <p className="text-xs text-slate-400 bg-slate-800/40 p-2 rounded-lg">{task.notes}</p>}
+                <div className="flex items-center justify-between text-[10px] text-slate-500 pt-2 border-t border-slate-800/40">
+                  <span>{ch ? ch.name : 'Network'}</span>
+                  <span>{task.dueDate ? `Due: ${new Date(task.dueDate).toLocaleDateString()}` : ''}</span>
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button size="xs" variant="secondary" icon={Edit3} onClick={() => startEdit(task)}>Edit</Button>
+                  <Button size="xs" variant="danger" icon={Trash2} onClick={() => deleteTask(task.id)}>Delete</Button>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        }) : (
+          <div className="col-span-full py-16 text-center text-slate-600">
+            <ListTodo className="w-12 h-12 mx-auto mb-3 text-slate-700" />
+            <p className="text-sm">No tasks yet. Click "Add New Task" to create one.</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function FinancialSettings() {
   const { db, showToast, apiFetch, refresh } = useApp();
   const { attendanceLogs, churches, zones, cellGroups, stewardshipSettings } = db;
@@ -2777,6 +2952,7 @@ function SetupSharePage() {
 
 const sidebarItems = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { id: 'todo-list', label: '📝 To-Do List & Tasks', icon: ListTodo },
   { id: 'setup-share', label: '🚀 Setup & Ultimate Share', icon: Rocket },
   { id: 'quarterly-reports', label: 'Quarterly Reports', icon: FileText },
   { id: 'youth-ministry', label: 'Youth Hub (13-45yrs)', icon: Zap },
@@ -2821,6 +2997,7 @@ function MainApp(){
   const renderTab = () => {
     switch(activeTab){
       case 'dashboard': return <Dashboard/>;
+      case 'todo-list': return <TodoListPage/>;
       case 'setup-share': return <SetupSharePage/>;
       case 'quarterly-reports': return <QuarterlyReportsPage/>;
       case 'youth-ministry': return <YouthMinistryPage/>;
