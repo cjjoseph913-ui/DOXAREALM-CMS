@@ -4,8 +4,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "postbuild": "drizzle-kit push",
     "start": "next start",
+    "prestart": "for i in 1 2 3 4 5; do npx drizzle-kit push && break; sleep 5; done",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit"
   },
