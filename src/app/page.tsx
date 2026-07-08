@@ -273,14 +273,25 @@ function Directory() {
   const { db, showToast, apiFetch, refresh } = useApp();
   const [search, setSearch] = useState('');
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState<any>({
-    name: '', email: '', phone: '', gender: 'Male', ageRange: '18-25', maritalStatus: 'Single', occupation: '', address: '', city: '',
-    waterBaptismStatus: 'Not Baptized', waterBaptismDate: '', waterBaptismLocation: '', waterBaptismBy: '', waterBaptismCertificate: '',
-    holySpiritBaptismStatus: 'Not Baptized', holySpiritBaptismDate: '', holySpiritEvidence: '', holySpiritNotes: '',
-    churchId: '', zoneId: '', cellGroupId: '', status: 'Active', conversionDate: '', membershipDate: '', emergencyContact: '', emergencyPhone: ''
-  });
+  const [editingId, setEditingId] = useState<number|null>(null);
+  const emptyForm = { name: '', email: '', phone: '', gender: 'Male', ageRange: '18-25', maritalStatus: 'Single', occupation: '', address: '', city: '', waterBaptismStatus: 'Not Baptized', waterBaptismDate: '', waterBaptismLocation: '', waterBaptismBy: '', waterBaptismCertificate: '', holySpiritBaptismStatus: 'Not Baptized', holySpiritBaptismDate: '', holySpiritEvidence: '', holySpiritNotes: '', churchId: '', zoneId: '', cellGroupId: '', status: 'Active', conversionDate: '', membershipDate: '', emergencyContact: '', emergencyPhone: '' };
+  const [form, setForm] = useState<any>(emptyForm);
 
   const filteredMembers = db.members.filter((m:any)=> m.name?.toLowerCase().includes(search.toLowerCase()) || m.email?.toLowerCase().includes(search.toLowerCase()));
+
+  const startEdit = (m:any) => {
+    const toDate = (v:any) => v ? new Date(v).toISOString().split('T')[0] : '';
+    setForm({
+      ...emptyForm,
+      id: m.id,
+      name: m.name || '', email: m.email || '', phone: m.phone || '', gender: m.gender || 'Male', ageRange: m.ageRange || '18-25', maritalStatus: m.maritalStatus || 'Single', occupation: m.occupation || '', address: m.address || '', city: m.city || '',
+      waterBaptismStatus: m.waterBaptismStatus || 'Not Baptized', waterBaptismDate: toDate(m.waterBaptismDate), waterBaptismLocation: m.waterBaptismLocation || '', waterBaptismBy: m.waterBaptismBy || '', waterBaptismCertificate: m.waterBaptismCertificate || '',
+      holySpiritBaptismStatus: m.holySpiritBaptismStatus || 'Not Baptized', holySpiritBaptismDate: toDate(m.holySpiritBaptismDate), holySpiritEvidence: m.holySpiritEvidence || '', holySpiritNotes: m.holySpiritNotes || '',
+      churchId: m.churchId ? String(m.churchId) : '', zoneId: m.zoneId ? String(m.zoneId) : '', cellGroupId: m.cellGroupId ? String(m.cellGroupId) : '', status: m.status || 'Active', conversionDate: toDate(m.conversionDate), membershipDate: toDate(m.membershipDate), emergencyContact: m.emergencyContact || '', emergencyPhone: m.emergencyPhone || ''
+    });
+    setEditingId(m.id);
+    setShowForm(true);
+  };
 
   const handleSubmit = async (e:any) => {
     e.preventDefault();
@@ -293,14 +304,20 @@ function Directory() {
       waterBaptismDate: form.waterBaptismDate ? new Date(form.waterBaptismDate).toISOString() : null,
       holySpiritBaptismDate: form.holySpiritBaptismDate ? new Date(form.holySpiritBaptismDate).toISOString() : null,
       conversionDate: form.conversionDate ? new Date(form.conversionDate).toISOString() : null,
-      membershipDate: form.membershipDate ? new Date(form.membershipDate).toISOString() : new Date().toISOString(),
+      membershipDate: form.membershipDate ? new Date(form.membershipDate).toISOString() : (editingId ? null : new Date().toISOString()),
     };
     try {
-      await apiFetch('/members', { method: 'POST', body: JSON.stringify(payload) });
-      await apiFetch('/audit-logs', { method: 'POST', body: JSON.stringify({ action: 'member_registered', details: `Member ${form.name} - Water: ${form.waterBaptismStatus}, Spirit: ${form.holySpiritBaptismStatus}`, timestamp: new Date().toISOString() }) });
-      showToast('Member registered successfully','success');
-      setShowForm(false);
-      setForm({ name: '', email: '', phone: '', gender: 'Male', ageRange: '18-25', maritalStatus: 'Single', occupation: '', address: '', city: '', waterBaptismStatus: 'Not Baptized', waterBaptismDate: '', waterBaptismLocation: '', waterBaptismBy: '', waterBaptismCertificate: '', holySpiritBaptismStatus: 'Not Baptized', holySpiritBaptismDate: '', holySpiritEvidence: '', holySpiritNotes: '', churchId: '', zoneId: '', cellGroupId: '', status: 'Active', conversionDate: '', membershipDate: '', emergencyContact: '', emergencyPhone: '' });
+      if (editingId) {
+        await apiFetch(`/members/${editingId}`, { method: 'PUT', body: JSON.stringify(payload) });
+        await apiFetch('/audit-logs', { method: 'POST', body: JSON.stringify({ action: 'member_updated', details: `Member ${form.name}`, timestamp: new Date().toISOString() }) });
+        showToast('Member updated successfully','success');
+      } else {
+        await apiFetch('/members', { method: 'POST', body: JSON.stringify(payload) });
+        await apiFetch('/audit-logs', { method: 'POST', body: JSON.stringify({ action: 'member_registered', details: `Member ${form.name} - Water: ${form.waterBaptismStatus}, Spirit: ${form.holySpiritBaptismStatus}`, timestamp: new Date().toISOString() }) });
+        showToast('Member registered successfully','success');
+      }
+      setShowForm(false); setEditingId(null);
+      setForm(emptyForm);
       refresh();
     } catch (err:any){ showToast(err.message,'error'); }
   };
@@ -312,7 +329,7 @@ function Directory() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div><h1 className="text-2xl font-bold text-slate-100 flex items-center gap-3"><Users className="w-6 h-6 text-indigo-400" /> Member Directory</h1><p className="text-sm text-slate-500 mt-1">Register members with water & Holy Spirit baptism tracking</p></div>
-        <Button icon={UserPlus} onClick={()=>setShowForm(true)}>Register Member</Button>
+        <Button icon={UserPlus} onClick={()=>{setEditingId(null); setForm(emptyForm); setShowForm(true);}}>Register Member</Button>
       </div>
 
       <div className="flex gap-3">
@@ -324,7 +341,7 @@ function Directory() {
         <div className="overflow-x-auto">
           <table className="w-full text-sm text-left">
             <thead><tr className="border-b border-slate-800/60 text-slate-500 text-xs uppercase tracking-wider">
-              <th className="px-4 py-3">Name</th><th className="px-4 py-3">Contact</th><th className="px-4 py-3">Church / Cell</th><th className="px-4 py-3">Water Baptism</th><th className="px-4 py-3">Holy Spirit</th><th className="px-4 py-3">Status</th>
+              <th className="px-4 py-3">Name</th><th className="px-4 py-3">Contact</th><th className="px-4 py-3">Church / Cell</th><th className="px-4 py-3">Water Baptism</th><th className="px-4 py-3">Holy Spirit</th><th className="px-4 py-3">Status</th><th className="px-4 py-3 text-right">Actions</th>
             </tr></thead>
             <tbody>
               {filteredMembers.length>0 ? filteredMembers.map((m:any,i:number)=>{
@@ -338,15 +355,16 @@ function Directory() {
                     <td className="px-4 py-3"><Badge variant={m.waterBaptismStatus==='Baptized' ? 'success' : m.waterBaptismStatus==='Not Baptized' ? 'default' : 'warning'}><Droplets className="w-3 h-3" />{m.waterBaptismStatus||'Not Baptized'}</Badge>{m.waterBaptismDate && <div className="text-[10px] text-slate-600 mt-1">{new Date(m.waterBaptismDate).toLocaleDateString()}</div>}</td>
                     <td className="px-4 py-3"><Badge variant={m.holySpiritBaptismStatus==='Baptized' ? 'success' : m.holySpiritBaptismStatus==='Not Baptized' ? 'default' : 'info'}><Flame className="w-3 h-3" />{m.holySpiritBaptismStatus||'Not Baptized'}</Badge>{m.holySpiritBaptismDate && <div className="text-[10px] text-slate-600 mt-1">{new Date(m.holySpiritBaptismDate).toLocaleDateString()}</div>}</td>
                     <td className="px-4 py-3"><Badge variant={m.status==='Active'?'success':'default'}>{m.status}</Badge></td>
+                    <td className="px-4 py-3 text-right"><Button variant="ghost" size="xs" icon={Edit3} onClick={()=>startEdit(m)}>Edit</Button></td>
                   </tr>
                 );
-              }) : <tr><td colSpan={6} className="px-4 py-12 text-center text-slate-600">No members found. Register your first member.</td></tr>}
+              }) : <tr><td colSpan={7} className="px-4 py-12 text-center text-slate-600">No members found. Register your first member.</td></tr>}
             </tbody>
           </table>
         </div>
       </Card>
 
-      <Modal open={showForm} onClose={()=>setShowForm(false)} title="Register New Member" size="xl">
+      <Modal open={showForm} onClose={()=>setShowForm(false)} title={editingId ? 'Edit Member' : 'Register New Member'} size="xl">
         <form onSubmit={handleSubmit} className="space-y-6">
           {/* Personal Info */}
           <div>
@@ -411,8 +429,8 @@ function Directory() {
           </div>
 
           <div className="flex justify-end gap-3 pt-4 border-t border-slate-800/60">
-            <Button variant="ghost" type="button" onClick={()=>setShowForm(false)}>Cancel</Button>
-            <Button type="submit" variant="primary" icon={Save} size="md">Register Member</Button>
+            <Button variant="ghost" type="button" onClick={()=>{setShowForm(false); setEditingId(null); setForm(emptyForm);}}>Cancel</Button>
+            <Button type="submit" variant="primary" icon={Save} size="md">{editingId ? 'Save Changes' : 'Register Member'}</Button>
           </div>
         </form>
       </Modal>
@@ -428,13 +446,28 @@ function RegionalHierarchy() {
   const [zoneForm, setZoneForm] = useState({ name: '', churchId: '', leaderName: '', leaderPhone: '', leaderEmail: '', description: '', meetingArea: '' });
   const [cellForm, setCellForm] = useState({ name: '', churchId: '', zoneId: '', leaderName: '', leaderPhone: '', leaderEmail: '', meetingDay: 'Sunday', meetingTime: '', location: '', address: '', maxCapacity: '15', description: '' });
 
+  const [editingChurch, setEditingChurch] = useState<number|null>(null);
+  const [editingZone, setEditingZone] = useState<number|null>(null);
+  const [editingCell, setEditingCell] = useState<number|null>(null);
+
+  const startEditChurch = (ch:any) => { setChurchForm({ ...ch, capacity: ch.capacity != null ? String(ch.capacity) : '' }); setEditingChurch(ch.id); };
+  const startEditZone = (z:any) => { setZoneForm({ ...z, churchId: z.churchId ? String(z.churchId) : '' }); setEditingZone(z.id); };
+  const startEditCell = (cg:any) => { setCellForm({ ...cg, churchId: cg.churchId ? String(cg.churchId) : '', zoneId: cg.zoneId ? String(cg.zoneId) : '', maxCapacity: cg.maxCapacity != null ? String(cg.maxCapacity) : '15' }); setEditingCell(cg.id); };
+
   const handleChurchSubmit = async (e:any) => {
     e.preventDefault();
     if (!churchForm.name) { showToast('Church name required','error'); return; }
     try {
-      await apiFetch('/churches', { method: 'POST', body: JSON.stringify({ ...churchForm, capacity: churchForm.capacity ? parseInt(churchForm.capacity) : null }) });
-      await apiFetch('/audit-logs', { method: 'POST', body: JSON.stringify({ action: 'church_registered', details: `Church ${churchForm.name}`, timestamp: new Date().toISOString() }) });
-      showToast(`Church ${churchForm.name} registered`,'success');
+      const body = { ...churchForm, capacity: churchForm.capacity ? parseInt(churchForm.capacity) : null };
+      if (editingChurch) {
+        await apiFetch(`/churches/${editingChurch}`, { method: 'PUT', body: JSON.stringify(body) });
+        showToast(`Church ${churchForm.name} updated`,'success');
+      } else {
+        await apiFetch('/churches', { method: 'POST', body: JSON.stringify(body) });
+        await apiFetch('/audit-logs', { method: 'POST', body: JSON.stringify({ action: 'church_registered', details: `Church ${churchForm.name}`, timestamp: new Date().toISOString() }) });
+        showToast(`Church ${churchForm.name} registered`,'success');
+      }
+      setEditingChurch(null);
       setChurchForm({ name: '', location: '', address: '', city: '', state: '', country: '', pastorName: '', pastorPhone: '', pastorEmail: '', phone: '', email: '', capacity: '', description: '' });
       refresh();
     } catch (err:any){ showToast(err.message,'error'); }
@@ -444,8 +477,15 @@ function RegionalHierarchy() {
     e.preventDefault();
     if (!zoneForm.name) { showToast('Zone name required','error'); return; }
     try {
-      await apiFetch('/zones', { method: 'POST', body: JSON.stringify({ ...zoneForm, churchId: zoneForm.churchId ? parseInt(zoneForm.churchId) : null }) });
-      showToast(`Zone ${zoneForm.name} registered`,'success');
+      const body = { ...zoneForm, churchId: zoneForm.churchId ? parseInt(zoneForm.churchId) : null };
+      if (editingZone) {
+        await apiFetch(`/zones/${editingZone}`, { method: 'PUT', body: JSON.stringify(body) });
+        showToast(`Zone ${zoneForm.name} updated`,'success');
+      } else {
+        await apiFetch('/zones', { method: 'POST', body: JSON.stringify(body) });
+        showToast(`Zone ${zoneForm.name} registered`,'success');
+      }
+      setEditingZone(null);
       setZoneForm({ name: '', churchId: '', leaderName: '', leaderPhone: '', leaderEmail: '', description: '', meetingArea: '' });
       refresh();
     } catch (err:any){ showToast(err.message,'error'); }
@@ -455,8 +495,15 @@ function RegionalHierarchy() {
     e.preventDefault();
     if (!cellForm.name) { showToast('Cell group name required','error'); return; }
     try {
-      await apiFetch('/cell-groups', { method: 'POST', body: JSON.stringify({ ...cellForm, churchId: cellForm.churchId ? parseInt(cellForm.churchId) : null, zoneId: cellForm.zoneId ? parseInt(cellForm.zoneId) : null, maxCapacity: parseInt(cellForm.maxCapacity)||15 }) });
-      showToast(`Cell Group ${cellForm.name} registered`,'success');
+      const body = { ...cellForm, churchId: cellForm.churchId ? parseInt(cellForm.churchId) : null, zoneId: cellForm.zoneId ? parseInt(cellForm.zoneId) : null, maxCapacity: parseInt(cellForm.maxCapacity)||15 };
+      if (editingCell) {
+        await apiFetch(`/cell-groups/${editingCell}`, { method: 'PUT', body: JSON.stringify(body) });
+        showToast(`Cell Group ${cellForm.name} updated`,'success');
+      } else {
+        await apiFetch('/cell-groups', { method: 'POST', body: JSON.stringify(body) });
+        showToast(`Cell Group ${cellForm.name} registered`,'success');
+      }
+      setEditingCell(null);
       setCellForm({ name: '', churchId: '', zoneId: '', leaderName: '', leaderPhone: '', leaderEmail: '', meetingDay: 'Sunday', meetingTime: '', location: '', address: '', maxCapacity: '15', description: '' });
       refresh();
     } catch (err:any){ showToast(err.message,'error'); }
@@ -476,7 +523,7 @@ function RegionalHierarchy() {
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
         <div className="lg:col-span-2">
           {activeSub==='churches' && (
-            <Card><CardHeader><h3 className="text-sm font-semibold flex items-center gap-2"><Building2 className="w-4 h-4 text-indigo-400"/> Register New Church</h3></CardHeader><CardContent><form onSubmit={handleChurchSubmit} className="space-y-4">
+            <Card><CardHeader><h3 className="text-sm font-semibold flex items-center gap-2"><Building2 className="w-4 h-4 text-indigo-400"/> {editingChurch ? 'Edit Church' : 'Register New Church'}</h3></CardHeader><CardContent><form onSubmit={handleChurchSubmit} className="space-y-4">
               <Input label="Church Name *" value={churchForm.name} onChange={(e:any)=>setChurchForm({...churchForm,name:e.target.value})} required placeholder="DoxaRealm Central" />
               <div className="grid grid-cols-2 gap-3">
                 <Input label="Location / Area" value={churchForm.location} onChange={(e:any)=>setChurchForm({...churchForm,location:e.target.value})} placeholder="Downtown District" />
@@ -496,12 +543,12 @@ function RegionalHierarchy() {
                 <Input label="Capacity" type="number" value={churchForm.capacity} onChange={(e:any)=>setChurchForm({...churchForm,capacity:e.target.value})} placeholder="500" />
               </div>
               <Textarea label="Description" value={churchForm.description} onChange={(e:any)=>setChurchForm({...churchForm,description:e.target.value})} placeholder="Brief description of church mission..." />
-              <Button type="submit" className="w-full" icon={Plus}>Register Church</Button>
+              <div className="flex gap-3"><Button type="submit" className="flex-1" icon={Save}>{editingChurch ? 'Save Changes' : 'Register Church'}</Button>{editingChurch && <Button type="button" variant="ghost" onClick={()=>{setEditingChurch(null); setChurchForm({ name: '', location: '', address: '', city: '', state: '', country: '', pastorName: '', pastorPhone: '', pastorEmail: '', phone: '', email: '', capacity: '', description: '' });}}>Cancel</Button>}</div>
             </form></CardContent></Card>
           )}
 
           {activeSub==='zones' && (
-            <Card><CardHeader><h3 className="text-sm font-semibold flex items-center gap-2"><Compass className="w-4 h-4 text-emerald-400"/> Register New Zone</h3></CardHeader><CardContent><form onSubmit={handleZoneSubmit} className="space-y-4">
+            <Card><CardHeader><h3 className="text-sm font-semibold flex items-center gap-2"><Compass className="w-4 h-4 text-emerald-400"/> {editingZone ? 'Edit Zone' : 'Register New Zone'}</h3></CardHeader><CardContent><form onSubmit={handleZoneSubmit} className="space-y-4">
               <Input label="Zone Name *" value={zoneForm.name} onChange={(e:any)=>setZoneForm({...zoneForm,name:e.target.value})} required placeholder="North Zone, East Zone..." />
               <Select label="Parent Church" options={[{value:'',label:'— Select Church —'}, ...db.churches.map((c:any)=>({value:c.id,label:c.name}))]} value={zoneForm.churchId} onChange={(e:any)=>setZoneForm({...zoneForm,churchId:e.target.value})} />
               <div className="grid grid-cols-2 gap-3">
@@ -511,12 +558,12 @@ function RegionalHierarchy() {
               <Input label="Leader Email" value={zoneForm.leaderEmail} onChange={(e:any)=>setZoneForm({...zoneForm,leaderEmail:e.target.value})} />
               <Input label="Meeting Area" value={zoneForm.meetingArea} onChange={(e:any)=>setZoneForm({...zoneForm,meetingArea:e.target.value})} placeholder="Northern suburbs, Industrial area..." />
               <Textarea label="Description" value={zoneForm.description} onChange={(e:any)=>setZoneForm({...zoneForm,description:e.target.value})} placeholder="Zone coverage and vision..." />
-              <Button type="submit" className="w-full" icon={Plus}>Register Zone</Button>
+              <div className="flex gap-3"><Button type="submit" className="flex-1" icon={Save}>{editingZone ? 'Save Changes' : 'Register Zone'}</Button>{editingZone && <Button type="button" variant="ghost" onClick={()=>{setEditingZone(null); setZoneForm({ name: '', churchId: '', leaderName: '', leaderPhone: '', leaderEmail: '', description: '', meetingArea: '' });}}>Cancel</Button>}</div>
             </form></CardContent></Card>
           )}
 
           {activeSub==='cells' && (
-            <Card><CardHeader><h3 className="text-sm font-semibold flex items-center gap-2"><Layers className="w-4 h-4 text-amber-400"/> Register New Cell Group</h3></CardHeader><CardContent><form onSubmit={handleCellSubmit} className="space-y-4">
+            <Card><CardHeader><h3 className="text-sm font-semibold flex items-center gap-2"><Layers className="w-4 h-4 text-amber-400"/> {editingCell ? 'Edit Cell Group' : 'Register New Cell Group'}</h3></CardHeader><CardContent><form onSubmit={handleCellSubmit} className="space-y-4">
               <Input label="Cell Group Name *" value={cellForm.name} onChange={(e:any)=>setCellForm({...cellForm,name:e.target.value})} required placeholder="Family of Joy, Grace Cell..." />
               <div className="grid grid-cols-2 gap-3">
                 <Select label="Church" options={[{value:'',label:'— Select Church —'}, ...db.churches.map((c:any)=>({value:c.id,label:c.name}))]} value={cellForm.churchId} onChange={(e:any)=>setCellForm({...cellForm,churchId:e.target.value})} />
@@ -537,7 +584,7 @@ function RegionalHierarchy() {
                 <Input label="Leader Email" value={cellForm.leaderEmail} onChange={(e:any)=>setCellForm({...cellForm,leaderEmail:e.target.value})} />
               </div>
               <Textarea label="Description" value={cellForm.description} onChange={(e:any)=>setCellForm({...cellForm,description:e.target.value})} placeholder="Cell group focus and goals..." />
-              <Button type="submit" className="w-full" icon={Plus}>Register Cell Group</Button>
+              <div className="flex gap-3"><Button type="submit" className="flex-1" icon={Save}>{editingCell ? 'Save Changes' : 'Register Cell Group'}</Button>{editingCell && <Button type="button" variant="ghost" onClick={()=>{setEditingCell(null); setCellForm({ name: '', churchId: '', zoneId: '', leaderName: '', leaderPhone: '', leaderEmail: '', meetingDay: 'Sunday', meetingTime: '', location: '', address: '', maxCapacity: '15', description: '' });}}>Cancel</Button>}</div>
             </form></CardContent></Card>
           )}
         </div>
@@ -549,6 +596,7 @@ function RegionalHierarchy() {
                 <div key={i} className="p-4 bg-slate-800/40 rounded-xl border border-slate-700/40">
                   <div className="flex items-start justify-between"><div className="flex items-center gap-3"><div className="p-2 bg-indigo-900/30 rounded-lg"><Building2 className="w-5 h-5 text-indigo-400"/></div><div><p className="font-medium text-slate-200">{ch.name}</p><p className="text-xs text-slate-500">{ch.location} {ch.city ? `• ${ch.city}` : ''}</p></div></div><Badge variant="info">{db.zones.filter((z:any)=>z.churchId===ch.id).length} zones</Badge></div>
                   <div className="mt-3 text-xs text-slate-500 space-y-1"><p>Pastor: {ch.pastorName||'—'} {ch.pastorPhone?`• ${ch.pastorPhone}`:''}</p><p>{ch.address||''}</p></div>
+                  <div className="mt-3 flex justify-end"><Button variant="ghost" size="xs" icon={Edit3} onClick={()=>startEditChurch(ch)}>Edit</Button></div>
                 </div>
               )) : <p className="text-sm text-slate-600 text-center py-8">No churches registered yet</p>}
             </CardContent></Card>
@@ -558,6 +606,7 @@ function RegionalHierarchy() {
               {db.zones.length>0 ? db.zones.map((z:any,i:number)=>(
                 <div key={i} className="p-4 bg-slate-800/40 rounded-xl border border-slate-700/40">
                   <div className="flex items-center justify-between"><div className="flex items-center gap-3"><div className="p-2 bg-emerald-900/30 rounded-lg"><MapPin className="w-5 h-5 text-emerald-400"/></div><div><p className="font-medium text-slate-200">{z.name}</p><p className="text-xs text-slate-500">Church: {db.churches.find((c:any)=>c.id===z.churchId)?.name || '—'} • Leader: {z.leaderName||'—'}</p></div></div><Badge>{db.cellGroups.filter((c:any)=>c.zoneId===z.id).length} cells</Badge></div>
+                  <div className="mt-3 flex justify-end"><Button variant="ghost" size="xs" icon={Edit3} onClick={()=>startEditZone(z)}>Edit</Button></div>
                 </div>
               )) : <p className="text-sm text-slate-600 text-center py-8">No zones yet — create from parent church</p>}
             </CardContent></Card>
@@ -568,6 +617,7 @@ function RegionalHierarchy() {
                 <div key={i} className="p-4 bg-slate-800/40 rounded-xl border border-slate-700/40">
                   <div className="flex items-center justify-between"><div className="flex items-center gap-3"><div className="p-2 bg-amber-900/30 rounded-lg"><Users className="w-5 h-5 text-amber-400"/></div><div><p className="font-medium text-slate-200">{cg.name}</p><p className="text-xs text-slate-500">{cg.meetingDay||''} {cg.meetingTime?`at ${cg.meetingTime}`:''} • {cg.location||'No location'}</p></div></div><Badge variant="warning">{cg.maxCapacity||15} cap</Badge></div>
                   <div className="mt-2 text-xs text-slate-500">Zone: {db.zones.find((z:any)=>z.id===cg.zoneId)?.name||'—'} • Leader: {cg.leaderName||'—'}</div>
+                  <div className="mt-3 flex justify-end"><Button variant="ghost" size="xs" icon={Edit3} onClick={()=>startEditCell(cg)}>Edit</Button></div>
                 </div>
               )) : <p className="text-sm text-slate-600 text-center py-8">No cell groups yet</p>}
             </CardContent></Card>
@@ -579,136 +629,78 @@ function RegionalHierarchy() {
 }
 
 // Simple placeholders for other tabs
-function VisitorsPage(){ const {db, showToast, apiFetch, refresh}=useApp(); const [form,setForm]=useState({name:'',email:'',phone:'',followUpStatus:'Pending'}); const handle=async(e:any)=>{ e.preventDefault(); if(!form.name) return showToast('Name required','error'); try{ await apiFetch('/visitors',{method:'POST',body:JSON.stringify(form)}); refresh(); setForm({name:'',email:'',phone:'',followUpStatus:'Pending'}); showToast('Visitor added','success'); }catch(err:any){ showToast(err.message,'error'); } }; return <div className="space-y-6"><h1 className="text-2xl font-bold flex items-center gap-2"><UserPlus className="w-6 h-6 text-indigo-400"/>Visitors</h1><Card><CardContent><form onSubmit={handle} className="grid grid-cols-3 gap-4"><Input label="Name" value={form.name} onChange={(e:any)=>setForm({...form,name:e.target.value})} required/><Input label="Email" value={form.email} onChange={(e:any)=>setForm({...form,email:e.target.value})}/><Button type="submit">Add</Button></form></CardContent></Card><Card><CardContent><table className="w-full text-sm"><tbody>{db.visitors.map((v:any,i:number)=><tr key={i} className="border-b border-slate-800/40"><td className="py-2">{v.name}</td><td><Badge>{v.followUpStatus}</Badge></td></tr>)}</tbody></table></CardContent></Card></div>; }
-function ConvertsPage(){ const {db, showToast, apiFetch, refresh}=useApp(); const [form,setForm]=useState({name:'',contact:'',step:'Assigned'}); const handle=async(e:any)=>{ e.preventDefault(); try{ await apiFetch('/converts',{method:'POST',body:JSON.stringify(form)}); refresh(); setForm({name:'',contact:'',step:'Assigned'}); }catch(err:any){ showToast(err.message,'error'); } }; return <div className="space-y-6"><h1 className="text-2xl font-bold flex items-center gap-2"><Baby className="w-6 h-6 text-indigo-400"/>New Converts</h1><Card><CardContent><form onSubmit={handle} className="grid grid-cols-3 gap-4"><Input label="Name" value={form.name} onChange={(e:any)=>setForm({...form,name:e.target.value})} required/><Button type="submit">Add Convert</Button></form></CardContent></Card><Card><CardContent>{db.converts.map((c:any,i:number)=><div key={i} className="py-2 border-b border-slate-800/40 flex justify-between"><span>{c.name}</span><Badge>{c.step}</Badge></div>)}</CardContent></Card></div>; }
-function CommunicationsHub(){ const {db}=useApp(); return <div className="space-y-6"><h1 className="text-2xl font-bold flex items-center gap-2"><MessageSquare className="w-6 h-6 text-indigo-400"/>Communications</h1><Card><CardContent>{db.communicationLogs.map((c:any,i:number)=><div key={i} className="py-2 border-b border-slate-800/40">{c.type}: {c.subject}</div>)}</CardContent></Card></div>; }
+function VisitorsPage(){
+  const {db, showToast, apiFetch, refresh}=useApp();
+  const [form,setForm]=useState<any>({name:'',email:'',phone:'',followUpStatus:'Pending'});
+  const [editingId,setEditingId]=useState<number|null>(null);
+  const handle=async(e:any)=>{ e.preventDefault(); if(!form.name) return showToast('Name required','error');
+    try{ if(editingId){ await apiFetch(`/visitors/${editingId}`,{method:'PUT',body:JSON.stringify(form)}); showToast('Visitor updated','success'); } else { await apiFetch('/visitors',{method:'POST',body:JSON.stringify(form)}); showToast('Visitor added','success'); }
+      refresh(); setForm({name:'',email:'',phone:'',followUpStatus:'Pending'}); setEditingId(null);
+    }catch(err:any){ showToast(err.message,'error'); } };
+  const startEdit=(v:any)=>{ setForm({name:v.name||'',email:v.email||'',phone:v.phone||'',followUpStatus:v.followUpStatus||'Pending', id:v.id}); setEditingId(v.id); };
+  return <div className="space-y-6"><h1 className="text-2xl font-bold flex items-center gap-2"><UserPlus className="w-6 h-6 text-indigo-400"/>Visitors</h1>
+    <Card><CardContent><form onSubmit={handle} className="grid grid-cols-1 sm:grid-cols-4 gap-4 items-end"><Input label="Name *" value={form.name} onChange={(e:any)=>setForm({...form,name:e.target.value})} required/><Input label="Email" value={form.email} onChange={(e:any)=>setForm({...form,email:e.target.value})}/><Select label="Status" options={['Pending','Contacted','Joined','Closed']} value={form.followUpStatus} onChange={(e:any)=>setForm({...form,followUpStatus:e.target.value})}/><Button type="submit" icon={editingId?Save:UserPlus}>{editingId?'Save Changes':'Add Visitor'}</Button></form></CardContent></Card>
+    <Card><CardContent><table className="w-full text-sm"><thead><tr className="border-b border-slate-800/60 text-xs text-slate-500"><th className="py-2 text-left">Name</th><th className="py-2 text-left">Email</th><th className="py-2">Status</th><th className="py-2 text-right">Actions</th></tr></thead><tbody>{db.visitors.map((v:any,i:number)=><tr key={i} className="border-b border-slate-800/40"><td className="py-2">{v.name}</td><td className="py-2 text-xs text-slate-400">{v.email||'—'}</td><td className="py-2"><Badge>{v.followUpStatus}</Badge></td><td className="py-2 text-right"><Button variant="ghost" size="xs" icon={Edit3} onClick={()=>startEdit(v)}>Edit</Button></td></tr>)}</tbody></table></CardContent></Card></div>;
+}
+
+function ConvertsPage(){
+  const {db, showToast, apiFetch, refresh}=useApp();
+  const [form,setForm]=useState<any>({name:'',contact:'',step:'Assigned'});
+  const [editingId,setEditingId]=useState<number|null>(null);
+  const handle=async(e:any)=>{ e.preventDefault(); if(!form.name) return showToast('Name required','error');
+    try{ if(editingId){ await apiFetch(`/converts/${editingId}`,{method:'PUT',body:JSON.stringify(form)}); showToast('Convert updated','success'); } else { await apiFetch('/converts',{method:'POST',body:JSON.stringify(form)}); showToast('Convert added','success'); }
+      refresh(); setForm({name:'',contact:'',step:'Assigned'}); setEditingId(null);
+    }catch(err:any){ showToast(err.message,'error'); } };
+  const startEdit=(c:any)=>{ setForm({name:c.name||'',contact:c.contact||'',step:c.step||'Assigned', id:c.id}); setEditingId(c.id); };
+  return <div className="space-y-6"><h1 className="text-2xl font-bold flex items-center gap-2"><Baby className="w-6 h-6 text-indigo-400"/>New Converts</h1>
+    <Card><CardContent><form onSubmit={handle} className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end"><Input label="Name *" value={form.name} onChange={(e:any)=>setForm({...form,name:e.target.value})} required/><Input label="Contact" value={form.contact} onChange={(e:any)=>setForm({...form,contact:e.target.value})}/><Button type="submit" icon={editingId?Save:Baby}>{editingId?'Save Changes':'Add Convert'}</Button></form></CardContent></Card>
+    <Card><CardContent><table className="w-full text-sm"><thead><tr className="border-b border-slate-800/60 text-xs text-slate-500"><th className="py-2 text-left">Name</th><th className="py-2 text-left">Contact</th><th className="py-2">Step</th><th className="py-2 text-right">Actions</th></tr></thead><tbody>{db.converts.map((c:any,i:number)=><tr key={i} className="border-b border-slate-800/40"><td className="py-2">{c.name}</td><td className="py-2 text-xs text-slate-400">{c.contact||'—'}</td><td className="py-2"><Badge>{c.step}</Badge></td><td className="py-2 text-right"><Button variant="ghost" size="xs" icon={Edit3} onClick={()=>startEdit(c)}>Edit</Button></td></tr>)}</tbody></table></CardContent></Card></div>;
+}
+
+function CommunicationsHub(){ const {db}=useApp(); return <div className="space-y-6"><h1 className="text-2xl font-bold flex items-center gap-2"><MessageSquare className="w-6 h-6 text-indigo-400"/>Communications</h1><Card><CardContent>{db.communicationLogs.length===0?<p className="text-slate-600 text-center py-8">No communications logged yet</p>:db.communicationLogs.map((c:any,i:number)=><div key={i} className="py-2 border-b border-slate-800/40 text-sm"><span className="text-slate-200 font-medium">{c.type}</span> <span className="text-slate-500">— {c.subject||c.message||'—'}</span></div>)}</CardContent></Card></div>; }
+
 function FinancialSettings() {
   const { db, showToast, apiFetch, refresh } = useApp();
-  const [form, setForm] = useState({
-    baseCurrency: 'TZS',
-    monthlyCellTarget: 20,
-    titheGoalPercentage: 10,
-    contributionCategories: ['tithe','offering','seed','first_fruit','gospel','youth','other']
-  });
+  const [form, setForm] = useState<any>({ baseCurrency: 'TZS', monthlyCellTarget: 20, titheGoalPercentage: 10, contributionCategories: ['tithe','offering','seed','first_fruit','gospel','youth','other'] });
   const [newCategory, setNewCategory] = useState('');
   const [churchContributions, setChurchContributions] = useState<any[]>([]);
-
   useEffect(() => {
     if (db.stewardshipSettings) setForm(db.stewardshipSettings);
-    // Simulate per-church giving
-    const contrib = db.churches.map((ch: any) => ({
-      church: ch.name,
-      tithe: Math.floor(Math.random() * 1200000),
-      offering: Math.floor(Math.random() * 800000),
-      seed: Math.floor(Math.random() * 450000),
-      firstFruit: Math.floor(Math.random() * 300000),
-      gospel: Math.floor(Math.random() * 250000),
-      youth: Math.floor(Math.random() * 180000),
-      other: Math.floor(Math.random() * 150000),
-      total: 0,
-      currency: 'TZS'
-    }));
-    setChurchContributions(contrib.map((c: any) => ({
-      ...c,
-      total: Object.values(c).reduce((a: number, b: any) => a + (typeof b === 'number' ? b : 0), 0)
-    })));
+    const contrib = db.churches.map((ch: any) => ({ church: ch.name, tithe: Math.floor(Math.random()*1200000), offering: Math.floor(Math.random()*800000), seed: Math.floor(Math.random()*450000), firstFruit: Math.floor(Math.random()*300000), gospel: Math.floor(Math.random()*250000), youth: Math.floor(Math.random()*180000), other: Math.floor(Math.random()*150000), total: 0, currency: 'TZS' }));
+    setChurchContributions(contrib.map((c: any) => ({ ...c, total: Object.values(c).reduce((a: number, b: any) => a + (typeof b === 'number' ? b : 0), 0) })));
   }, [db.stewardshipSettings, db.churches]);
-
-  const handleSaveSettings = async (e: any) => {
-    e.preventDefault();
-    try {
-      await apiFetch('/stewardship-settings', { method: 'POST', body: JSON.stringify(form) });
-      refresh();
-      showToast('Stewardship settings updated with TZS support', 'success');
-    } catch (err: any) { showToast(err.message, 'error'); }
-  };
-
-  const currencies = ['TZS', 'USD', 'KES', 'UGX', 'EUR', 'GBP', 'ZAR'];
+  const handleSaveSettings = async (e: any) => { e.preventDefault(); try { await apiFetch('/stewardship-settings', { method: 'POST', body: JSON.stringify(form) }); refresh(); showToast('Stewardship settings updated','success'); } catch (err: any) { showToast(err.message,'error'); } };
+  const currencies = ['TZS','USD','KES','UGX','EUR','GBP','ZAR','NGN','RWF','BIF','MWK'];
   const categories = form.contributionCategories || ['tithe','offering','seed','first_fruit','gospel','youth','other'];
-
-  const totalTithe = churchContributions.reduce((sum, c) => sum + (c.tithe||0), 0);
-  const totalOffering = churchContributions.reduce((sum, c) => sum + (c.offering||0), 0);
-  const totalYouth = churchContributions.reduce((sum, c) => sum + (c.youth||0), 0);
-
+  const totalTithe = churchContributions.reduce((sum:any,c:any)=>sum+(c.tithe||0),0);
+  const totalOffering = churchContributions.reduce((sum:any,c:any)=>sum+(c.offering||0),0);
+  const totalYouth = churchContributions.reduce((sum:any,c:any)=>sum+(c.youth||0),0);
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-100 flex items-center gap-3"><Wallet className="w-6 h-6 text-indigo-400" /> Stewardship &amp; Giving</h1>
-          <p className="text-sm text-slate-500 mt-1">Multi-currency support (TZS primary) • Track tithe, seed, first fruit, gospel, youth &amp; more per church</p>
-        </div>
-        <Badge variant="success" className="text-sm">TZS Enabled</Badge>
-      </div>
-
+      <div className="flex justify-between items-center"><div><h1 className="text-2xl font-bold text-slate-100 flex items-center gap-3"><Wallet className="w-6 h-6 text-indigo-400" /> Stewardship &amp; Giving</h1><p className="text-sm text-slate-500 mt-1">Multi-currency support (TZS primary) • Track tithe, seed, first fruit, gospel, youth &amp; more per church</p></div><Badge variant="success" className="text-sm">TZS Enabled</Badge></div>
       <div className="grid grid-cols-1 lg:grid-cols-7 gap-6">
-        {/* Settings */}
-        <Card className="lg:col-span-3">
-          <CardHeader>
-            <h3 className="text-sm font-semibold flex items-center gap-2"><Settings className="w-4 h-4" /> Global Settings</h3>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSaveSettings} className="space-y-6">
-              <Select label="Base Currency (Tanzania default)" options={currencies} value={form.baseCurrency} onChange={(e:any)=>setForm({...form,baseCurrency:e.target.value})} />
-              <Input label="Monthly Cell Target (TZS)" type="number" value={form.monthlyCellTarget} onChange={(e:any)=>setForm({...form,monthlyCellTarget:parseInt(e.target.value)||20})} />
-              <Input label="Tithe Goal (%)" type="number" step="0.1" value={form.titheGoalPercentage} onChange={(e:any)=>setForm({...form,titheGoalPercentage:parseFloat(e.target.value)||10})} />
-
-              <div>
-                <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-2">Contribution Categories</label>
-                <div className="flex flex-wrap gap-2 mb-4">
-                  {categories.map((cat:string,i:number)=>(
-                    <Badge key={i} variant="info" className="capitalize">{cat.replace('_',' ')}</Badge>
-                  ))}
-                </div>
-                <div className="flex gap-2">
-                  <Input placeholder="New category (e.g. building)" value={newCategory} onChange={(e:any)=>setNewCategory(e.target.value)} />
-                  <Button type="button" variant="secondary" onClick={()=>{
-                    if(newCategory && !categories.includes(newCategory.toLowerCase())){
-                      setForm({...form, contributionCategories: [...categories, newCategory.toLowerCase()]});
-                      setNewCategory('');
-                    }
-                  }}>Add</Button>
-                </div>
-              </div>
-
-              <Button type="submit" className="w-full" icon={Save}>Save Stewardship Settings</Button>
-            </form>
-          </CardContent>
-        </Card>
-
-        {/* Overview */}
-        <Card className="lg:col-span-4">
-          <CardHeader>
-            <h3 className="text-sm font-semibold flex items-center gap-2"><BarChart3 className="w-4 h-4" /> Church Giving Overview (TZS)</h3>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-3 gap-4 mb-6">
-              <div className="bg-slate-800/40 p-4 rounded-2xl border border-slate-700"><div className="text-xs text-slate-500">TOTAL TITHE</div><div className="text-3xl font-bold text-emerald-400 mt-1">{totalTithe.toLocaleString()}</div><div className="text-xs text-emerald-500">TZS</div></div>
-              <div className="bg-slate-800/40 p-4 rounded-2xl border border-slate-700"><div className="text-xs text-slate-500">TOTAL OFFERING</div><div className="text-3xl font-bold text-amber-400 mt-1">{totalOffering.toLocaleString()}</div><div className="text-xs text-amber-500">TZS</div></div>
-              <div className="bg-slate-800/40 p-4 rounded-2xl border border-slate-700"><div className="text-xs text-slate-500">YOUTH FUND</div><div className="text-3xl font-bold text-violet-400 mt-1">{totalYouth.toLocaleString()}</div><div className="text-xs text-violet-500">TZS</div></div>
-            </div>
-
-            <div className="max-h-[420px] overflow-y-auto pr-2">
-              {churchContributions.map((ch:any,i:number)=>(
-                <div key={i} className="flex justify-between items-center py-3 border-b border-slate-800/60 last:border-0 hover:bg-slate-800/30 px-2 rounded-lg group">
-                  <div>
-                    <div className="font-medium">{ch.church}</div>
-                    <div className="text-xs text-slate-500">All categories recorded in TZS</div>
-                  </div>
-                  <div className="text-right">
-                    <div className="font-mono text-emerald-300 text-sm">{ch.total.toLocaleString()} TZS</div>
-                    <div className="flex gap-3 text-[10px] text-slate-500 mt-1">
-                      <span>T:{ch.tithe}</span><span>O:{ch.offering}</span><span>Y:{ch.youth}</span>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+        <Card className="lg:col-span-3"><CardHeader><h3 className="text-sm font-semibold flex items-center gap-2"><Settings className="w-4 h-4" /> Global Settings</h3></CardHeader><CardContent><form onSubmit={handleSaveSettings} className="space-y-6">
+          <Select label="Base Currency (Tanzania default)" options={currencies} value={form.baseCurrency} onChange={(e:any)=>setForm({...form,baseCurrency:e.target.value})} />
+          <Input label="Monthly Cell Target (TZS)" type="number" value={form.monthlyCellTarget} onChange={(e:any)=>setForm({...form,monthlyCellTarget:parseInt(e.target.value)||20})} />
+          <Input label="Tithe Goal (%)" type="number" step="0.1" value={form.titheGoalPercentage} onChange={(e:any)=>setForm({...form,titheGoalPercentage:parseFloat(e.target.value)||10})} />
+          <div><label className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-2">Contribution Categories</label><div className="flex flex-wrap gap-2 mb-4">{categories.map((cat:string,i:number)=><Badge key={i} variant="info" className="capitalize">{cat.replace('_',' ')}</Badge>)}</div><div className="flex gap-2"><Input placeholder="New category (e.g. building)" value={newCategory} onChange={(e:any)=>setNewCategory(e.target.value)} /><Button type="button" variant="secondary" onClick={()=>{ if(newCategory && !categories.includes(newCategory.toLowerCase())){ setForm({...form, contributionCategories: [...categories, newCategory.toLowerCase()]}); setNewCategory(''); } }}>Add</Button></div></div>
+          <Button type="submit" className="w-full" icon={Save}>Save Stewardship Settings</Button>
+        </form></CardContent></Card>
+        <Card className="lg:col-span-4"><CardHeader><h3 className="text-sm font-semibold flex items-center gap-2"><BarChart3 className="w-4 h-4" /> Church Giving Overview (TZS)</h3></CardHeader><CardContent>
+          <div className="grid grid-cols-3 gap-4 mb-6">
+            <div className="bg-slate-800/40 p-4 rounded-2xl border border-slate-700"><div className="text-xs text-slate-500">TOTAL TITHE</div><div className="text-3xl font-bold text-emerald-400 mt-1">{totalTithe.toLocaleString()}</div><div className="text-xs text-emerald-500">TZS</div></div>
+            <div className="bg-slate-800/40 p-4 rounded-2xl border border-slate-700"><div className="text-xs text-slate-500">TOTAL OFFERING</div><div className="text-3xl font-bold text-amber-400 mt-1">{totalOffering.toLocaleString()}</div><div className="text-xs text-amber-500">TZS</div></div>
+            <div className="bg-slate-800/40 p-4 rounded-2xl border border-slate-700"><div className="text-xs text-slate-500">YOUTH FUND</div><div className="text-3xl font-bold text-violet-400 mt-1">{totalYouth.toLocaleString()}</div><div className="text-xs text-violet-500">TZS</div></div>
+          </div>
+          <div className="max-h-[420px] overflow-y-auto pr-2">{churchContributions.map((ch:any,i:number)=>(
+            <div key={i} className="flex justify-between items-center py-3 border-b border-slate-800/60 last:border-0 hover:bg-slate-800/30 px-2 rounded-lg"><div><div className="font-medium">{ch.church}</div><div className="text-xs text-slate-500">All categories recorded in TZS</div></div><div className="text-right"><div className="font-mono text-emerald-300 text-sm">{ch.total.toLocaleString()} TZS</div><div className="flex gap-3 text-[10px] text-slate-500 mt-1"><span>T:{ch.tithe}</span><span>O:{ch.offering}</span><span>Y:{ch.youth}</span></div></div></div>
+          ))}</div>
+        </CardContent></Card>
       </div>
     </div>
   );
 }
+
 function DocumentRepository(){ const {db}=useApp(); return <div className="space-y-6"><h1 className="text-2xl font-bold flex items-center gap-2"><Folder className="w-6 h-6 text-indigo-400"/>Documents</h1><Card><CardContent>{db.documents.length===0 ? 'No documents' : db.documents.map((d:any,i:number)=><div key={i}>{d.name}</div>)}</CardContent></Card></div>; }
 function AuditLogPage(){ const {db}=useApp(); return <div className="space-y-6"><h1 className="text-2xl font-bold flex items-center gap-2"><Shield className="w-6 h-6 text-indigo-400"/>Audit Log</h1><Card><CardContent><div className="space-y-2">{db.auditLogs.map((a:any,i:number)=><div key={i} className="text-sm py-2 border-b border-slate-800/40"><span className="font-medium">{a.action}</span> <span className="text-slate-500">- {a.details}</span> <span className="text-xs text-slate-600 float-right">{a.timestamp ? new Date(a.timestamp).toLocaleString() : ''}</span></div>)}</div></CardContent></Card></div>; }
 
@@ -1022,12 +1014,16 @@ function YouthMinistryPage() {
   const [selectedRoleFilter, setSelectedRoleFilter] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [editingId, setEditingId] = useState<number|null>(null);
 
-  const [form, setForm] = useState({
-    name: '', email: '', phone: '', gender: 'Male', youthAge: 21, youthMinistryRole: 'Active Youth Member',
-    youthEducationStage: 'University / College', churchId: '', zoneId: '', cellGroupId: '',
-    waterBaptismStatus: 'Not Baptized', holySpiritBaptismStatus: 'Not Baptized', emergencyContact: '', emergencyPhone: ''
-  });
+  const emptyYouthForm = { name: '', email: '', phone: '', gender: 'Male', youthAge: 21, youthMinistryRole: 'Active Youth Member', youthEducationStage: 'University / College', churchId: '', zoneId: '', cellGroupId: '', waterBaptismStatus: 'Not Baptized', holySpiritBaptismStatus: 'Not Baptized', emergencyContact: '', emergencyPhone: '' };
+  const [form, setForm] = useState<any>(emptyYouthForm);
+
+  const startEditYouth = (y:any) => {
+    setForm({ ...emptyYouthForm, id: y.id, name: y.name||'', email: y.email||'', phone: y.phone||'', gender: y.gender||'Male', youthAge: y.youthAge||21, youthMinistryRole: y.youthMinistryRole||'Active Youth Member', youthEducationStage: y.youthEducationStage||'University / College', churchId: y.churchId?String(y.churchId):'', zoneId: y.zoneId?String(y.zoneId):'', cellGroupId: y.cellGroupId?String(y.cellGroupId):'', waterBaptismStatus: y.waterBaptismStatus||'Not Baptized', holySpiritBaptismStatus: y.holySpiritBaptismStatus||'Not Baptized', emergencyContact: y.emergencyContact||'', emergencyPhone: y.emergencyPhone||'' });
+    setEditingId(y.id);
+    setShowForm(true);
+  };
 
   const youthMembers = useMemo(() => {
     return (db.members || []).filter((m: any) => {
@@ -1058,34 +1054,35 @@ function YouthMinistryPage() {
 
     try {
       setSubmitting(true);
-      await apiFetch('/members', { method: 'POST', body: JSON.stringify(payload) });
+      if (editingId) {
+        await apiFetch(`/members/${editingId}`, { method: 'PUT', body: JSON.stringify(payload) });
+        showToast(`Youth ${form.name} updated successfully`, 'success');
+      } else {
+        await apiFetch('/members', { method: 'POST', body: JSON.stringify(payload) });
 
-      if (payload.churchId) {
-        const ch = db.churches.find((c: any) => c.id === payload.churchId);
-        if (ch) {
-          await apiFetch('/churches', {
-            method: 'POST',
-            body: JSON.stringify({ ...ch, youthCount: (ch.youthCount || 0) + 1 })
-          });
+        if (payload.churchId) {
+          const ch = db.churches.find((c: any) => c.id === payload.churchId);
+          if (ch) {
+            await apiFetch('/churches', {
+              method: 'POST',
+              body: JSON.stringify({ ...ch, youthCount: (ch.youthCount || 0) + 1 })
+            });
+          }
         }
+
+        await apiFetch('/audit-logs', {
+          method: 'POST',
+          body: JSON.stringify({
+            action: 'youth_enrolled',
+            details: `Youth ${form.name} (${form.youthAge}yrs) enrolled in role ${form.youthMinistryRole}`,
+            timestamp: new Date().toISOString()
+          })
+        });
+
+        showToast(`Youth ${form.name} registered successfully`, 'success');
       }
-
-      await apiFetch('/audit-logs', {
-        method: 'POST',
-        body: JSON.stringify({
-          action: 'youth_enrolled',
-          details: `Youth ${form.name} (${form.youthAge}yrs) enrolled in role ${form.youthMinistryRole}`,
-          timestamp: new Date().toISOString()
-        })
-      });
-
-      showToast(`Youth ${form.name} registered successfully`, 'success');
-      setShowForm(false);
-      setForm({
-        name: '', email: '', phone: '', gender: 'Male', youthAge: 21, youthMinistryRole: 'Active Youth Member',
-        youthEducationStage: 'University / College', churchId: '', zoneId: '', cellGroupId: '',
-        waterBaptismStatus: 'Not Baptized', holySpiritBaptismStatus: 'Not Baptized', emergencyContact: '', emergencyPhone: ''
-      });
+      setShowForm(false); setEditingId(null);
+      setForm(emptyYouthForm);
       refresh();
     } catch (err: any) {
       showToast(err.message, 'error');
@@ -1118,7 +1115,7 @@ function YouthMinistryPage() {
           </h1>
           <p className="text-sm text-slate-500 mt-1">Dedicated registration &amp; tracking for Youth specifically aged <strong>13 to 45 years</strong></p>
         </div>
-        <Button icon={Plus} variant="primary" size="md" onClick={() => setShowForm(true)}>Enroll New Youth</Button>
+        <Button icon={Plus} variant="primary" size="md" onClick={() => { setEditingId(null); setForm(emptyYouthForm); setShowForm(true); }}>Enroll New Youth</Button>
       </div>
 
       {/* Overview Metric Banner */}
@@ -1198,6 +1195,7 @@ function YouthMinistryPage() {
                 <th className="py-3 px-4">Church Affiliation</th>
                 <th className="py-3 px-4">Ministry Role</th>
                 <th className="py-3 px-4">Spiritual Milestones</th>
+                <th className="py-3 px-4 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60 font-sans">
@@ -1237,11 +1235,12 @@ function YouthMinistryPage() {
                         </Badge>
                       </div>
                     </td>
+                    <td className="py-3 px-4 text-right"><Button variant="ghost" size="xs" icon={Edit3} onClick={()=>startEditYouth(y)}>Edit</Button></td>
                   </tr>
                 );
               }) : (
                 <tr>
-                  <td colSpan={5} className="py-12 px-4 text-center text-slate-600">
+                  <td colSpan={6} className="py-12 px-4 text-center text-slate-600">
                     No youth registered matching criteria. Enroll your first Youth member.
                   </td>
                 </tr>
@@ -1252,7 +1251,7 @@ function YouthMinistryPage() {
       </Card>
 
       {/* Register Youth Modal */}
-      <Modal open={showForm} onClose={() => setShowForm(false)} title="Enroll New Youth Member (13-45 yrs)" size="lg">
+      <Modal open={showForm} onClose={() => { setShowForm(false); setEditingId(null); setForm(emptyYouthForm); }} title={editingId ? 'Edit Youth Member (13-45 yrs)' : 'Enroll New Youth Member (13-45 yrs)'} size="lg">
         <form onSubmit={handleEnrollYouth} className="space-y-6">
           <div className="bg-violet-950/20 p-4 rounded-xl border border-violet-900/30 text-xs text-violet-300">
             <Info className="w-4 h-4 inline mr-1" /> Enrolling directly aligns the youth with their home church and tracks youth specific development.
@@ -1318,9 +1317,9 @@ function YouthMinistryPage() {
           </div>
 
           <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
-            <Button variant="ghost" type="button" onClick={() => setShowForm(false)}>Cancel</Button>
+            <Button variant="ghost" type="button" onClick={() => { setShowForm(false); setEditingId(null); setForm(emptyYouthForm); }}>Cancel</Button>
             <Button type="submit" variant="primary" icon={Zap} disabled={submitting}>
-              {submitting ? 'Enrolling...' : 'Confirm Youth Enrollment'}
+              {submitting ? (editingId ? 'Saving...' : 'Enrolling...') : (editingId ? 'Save Changes' : 'Confirm Youth Enrollment')}
             </Button>
           </div>
         </form>
