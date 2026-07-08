@@ -14,6 +14,7 @@ const entityMap: Record<string, any> = {
   'sunday-ledgers': schema.attendanceLogs,
   'communication-logs': schema.communicationLogs,
   'region-notices': schema.regionNotices,
+  'todo-tasks': schema.todoTasks,
   'audit-logs': schema.auditLogs,
   'stewardship-settings': schema.stewardshipSettings,
   'documents': schema.documents,

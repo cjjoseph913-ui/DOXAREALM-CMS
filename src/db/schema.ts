@@ -165,6 +165,19 @@ export const regionNotices = pgTable("region_notices", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+export const todoTasks = pgTable("todo_tasks", {
+  id: serial("id").primaryKey(),
+  task: text("task").notNull(),
+  assignedTo: text("assigned_to").default("All Leaders"),
+  priority: text("priority").default("Medium"),
+  dueDate: timestamp("date_due"),
+  status: text("status").default("Pending"),
+  churchId: integer("church_id"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 export const auditLogs = pgTable("audit_logs", {
   id: serial("id").primaryKey(),
   action: text("action"),

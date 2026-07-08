@@ -12,7 +12,8 @@ import {
   Send, Shield, Users, UserPlus, Wallet, X, Phone, Layers, Droplets, Flame, Home, Briefcase, Gift,
   UserCheck, Zap, Clock, Trash2, Edit3, Settings, BarChart3, Download, Printer, Award, Filter, Info,
   Share2, ExternalLink, Copy, Smartphone, Server, HardDrive, Check, Rocket,
-  Megaphone, Pin, Radio, AlertTriangle
+  Megaphone, Pin, Radio, AlertTriangle,
+  CheckSquare, ListTodo, CalendarDays
 } from 'lucide-react';
 
 const API_BASE = '/api';
@@ -196,8 +197,8 @@ function Modal({ open, onClose, title, children, size = 'lg' }: any) {
 
 // Dashboard
 function Dashboard() {
-  const { db, refresh } = useApp();
-  const { members, attendanceLogs, visitors, churches } = db;
+  const { db, refresh, showToast, apiFetch } = useApp();
+  const { members, attendanceLogs, visitors, churches, regionNotices, todoTasks } = db;
   const activeMembers = members.filter((m: any) => m.status !== 'Inactive').length;
   const pendingVisitors = visitors.filter((v: any) => v.followUpStatus === 'Pending').length;
   const sortedAttendance = [...attendanceLogs].sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime()).slice(-8);
@@ -227,20 +228,119 @@ function Dashboard() {
     { name: 'Other', value: 680000, fill: '#f59e0b' },
   ];
 
+  const sortedNotices = (regionNotices || []).sort((a: any, b: any) => new Date(b.datePosted).getTime() - new Date(a.datePosted).getTime()).slice(0, 4);
+  const pendingTodos = (todoTasks || []).filter((t: any) => t.status !== 'Completed').sort((a: any, b: any) => (b.priority === 'High' ? 1 : 0) - (a.priority === 'High' ? 1 : 0));
+
+  const toggleTodoStatus = async (task: any) => {
+    const nextStatus = task.status === 'Pending' ? 'In Progress' : 'Completed';
+    try {
+      await apiFetch(`/todo-tasks/${task.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ ...task, status: nextStatus, updatedAt: new Date().toISOString() })
+      });
+      showToast(`Task status updated to ${nextStatus}`, 'success');
+      refresh();
+    } catch (err: any) { showToast(err.message, 'error'); }
+  };
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div><h1 className="text-2xl font-bold text-slate-100 flex items-center gap-3"><LayoutDashboard className="w-6 h-6 text-indigo-400" /> Executive Dashboard</h1><p className="text-sm text-slate-500 mt-1">KPI overview including baptism milestones</p></div>
-        <button onClick={refresh} className="flex items-center gap-2 text-xs text-slate-400 hover:text-slate-200 bg-slate-800/60 hover:bg-slate-700/60 px-3 py-1.5 rounded-lg border border-slate-700/60"><RefreshCw className="w-3.5 h-3.5" /> Refresh</button>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-100 flex items-center gap-3"><LayoutDashboard className="w-6 h-6 text-indigo-400" /> Executive Dashboard</h1>
+          <p className="text-sm text-slate-500 mt-1">High-level strategic overview, quick sight executive action notices &amp; network actionable to-do list</p>
+        </div>
+        <button onClick={refresh} className="flex items-center gap-2 text-xs text-slate-400 hover:text-slate-200 bg-slate-800/60 hover:bg-slate-700/60 px-3 py-1.5 rounded-lg border border-slate-700/60 transition"><RefreshCw className="w-3.5 h-3.5" /> Refresh</button>
       </div>
+
+      {/* Top Main Metrics Banner */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {metrics.map((m, i) => (
           <Card key={i}><CardContent className="flex items-start gap-4"><div className={`p-2.5 rounded-xl ${m.bg}`}><m.icon className={`w-5 h-5 ${m.color}`} /></div><div><p className="text-xs text-slate-500 uppercase tracking-wider">{m.label}</p><p className={`text-2xl font-bold mt-0.5 ${m.color}`}>{m.value}</p></div></CardContent></Card>
         ))}
       </div>
+
+      {/* Quick Sight Executive Action Panels (Notices & To-Do Execution Tasks) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Active Strategic Action Notices */}
+        <Card className="border-indigo-900/40 bg-slate-900/90 shadow-2xl flex flex-col justify-between">
+          <CardHeader className="bg-indigo-950/30 flex justify-between items-center">
+            <h3 className="text-base font-bold text-slate-100 flex items-center gap-2 tracking-tight">
+              <Megaphone className="w-5 h-5 text-indigo-400 animate-pulse flex-shrink-0" /> 📌 Quick Sight Regional Action Notices (Taarifa &amp; Matangazo)
+            </h3>
+            <Badge variant="primary" className="text-xs font-mono">{regionNotices?.length || 0} Posted</Badge>
+          </CardHeader>
+          <CardContent className="space-y-4 max-h-80 overflow-y-auto pr-2 flex-1">
+            {sortedNotices.length > 0 ? sortedNotices.map((n: any, idx: number) => {
+              const ch = (churches || []).find((c: any) => c.id === n.churchId);
+              return (
+                <div key={idx} className="p-4 bg-slate-800/40 rounded-2xl border border-slate-800/80 hover:border-slate-700/80 transition space-y-2.5 relative group">
+                  <div className="flex items-center justify-between">
+                    <Badge variant={n.category === 'Finance' ? 'success' : n.category === 'Emergency' ? 'danger' : 'warning'} className="text-[10px]">
+                      {n.category || 'General'}
+                    </Badge>
+                    {n.priority === 'Urgent' && <Badge variant="danger" className="text-[9px] animate-bounce">🚨 URGENT</Badge>}
+                  </div>
+                  <h4 className="font-bold text-base text-slate-100 tracking-tight">{n.title}</h4>
+                  <p className="text-xs text-slate-300 leading-relaxed font-sans bg-slate-950/30 p-2.5 rounded-xl border border-slate-800/40">{n.content}</p>
+                  <div className="flex items-center justify-between text-[10px] text-slate-500 pt-1">
+                    <span className="font-medium text-indigo-400">{n.authorRole} {ch ? `• ${ch.name}` : ''}</span>
+                    <span className="font-mono text-slate-400">{new Date(n.datePosted).toLocaleDateString()}</span>
+                  </div>
+                </div>
+              );
+            }) : (
+              <p className="text-sm text-slate-500 text-center py-12 font-sans">No strategic regional action notices currently posted.</p>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Strategic Action Tasks (To-Do List) */}
+        <Card className="border-amber-900/40 bg-slate-900/90 shadow-2xl flex flex-col justify-between">
+          <CardHeader className="bg-amber-950/30 flex justify-between items-center">
+            <h3 className="text-base font-bold text-slate-100 flex items-center gap-2 tracking-tight">
+              <ListTodo className="w-5 h-5 text-amber-400 flex-shrink-0" /> 📝 Actionable Discipleship &amp; Network Tasks (To-Do List)
+            </h3>
+            <Badge variant="warning" className="text-xs font-mono">{pendingTodos.length} Actionable</Badge>
+          </CardHeader>
+          <CardContent className="space-y-3.5 max-h-80 overflow-y-auto pr-2 flex-1">
+            {pendingTodos.length > 0 ? pendingTodos.map((task: any, idx: number) => {
+              const ch = (churches || []).find((c: any) => c.id === task.churchId);
+              const isProg = task.status === 'In Progress';
+              return (
+                <div key={idx} className="p-4 bg-slate-800/40 rounded-2xl border border-slate-800/80 flex items-start gap-3.5 hover:border-slate-700/80 transition relative">
+                  <button
+                    onClick={() => toggleTodoStatus(task)}
+                    className={`mt-1 p-1.5 rounded-lg transition-all cursor-pointer flex-shrink-0 shadow ${isProg ? 'bg-amber-400 text-slate-950 font-bold ring-4 ring-amber-500/30 scale-105' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'}`}
+                    title={isProg ? 'In Progress — Click to complete task' : 'Pending — Click to mark In Progress'}
+                  >
+                    <Check className="w-4 h-4" />
+                  </button>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-indigo-300 truncate tracking-tight">{task.assignedTo || 'All Regional Leaders'}</span>
+                      <Badge variant={isProg ? 'warning' : 'default'} className="text-[9px] font-mono tracking-wider">{task.status}</Badge>
+                    </div>
+                    <p className="text-sm font-bold text-slate-100 mt-1 tracking-tight">{task.task}</p>
+                    {task.notes && <p className="text-xs text-slate-300 mt-1.5 bg-slate-950/40 p-2 rounded-lg border border-slate-800/40 font-sans leading-relaxed line-clamp-2">{task.notes}</p>}
+                    <div className="flex items-center justify-between text-[10px] text-slate-500 pt-2.5 mt-2.5 border-t border-slate-800/80">
+                      <span className="font-medium text-slate-400">{task.priority} Priority {ch ? `• ${ch.name}` : ''}</span>
+                      {task.dueDate && <span className="font-mono text-amber-300 tracking-tight">🎯 Due: {new Date(task.dueDate).toLocaleDateString()}</span>}
+                    </div>
+                  </div>
+                </div>
+              );
+            }) : (
+              <p className="text-sm text-slate-500 text-center py-12 font-sans">No strategic pending execution tasks! Everything accomplished perfectly.</p>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Attendance & Financial Giving Distribution Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <Card className="lg:col-span-2"><CardHeader><h3 className="text-sm font-semibold text-slate-200 flex items-center gap-2"><Activity className="w-4 h-4 text-indigo-400" /> Weekly Attendance</h3></CardHeader><CardContent><div className="h-64">{attendanceTrend.length>0 ? <ResponsiveContainer width="100%" height="100%"><AreaChart data={attendanceTrend}><CartesianGrid strokeDasharray="3 3" stroke="#1e293b" /><XAxis dataKey="week" stroke="#475569" tick={{fontSize:11}}/><YAxis stroke="#475569" tick={{fontSize:11}}/><Tooltip contentStyle={{background:'#0f172a',border:'1px solid #334155',borderRadius:'8px'}}/><Area type="monotone" dataKey="attendance" stroke="#6366f1" fill="#6366f1" fillOpacity={0.2} /></AreaChart></ResponsiveContainer> : <div className="h-full flex items-center justify-center text-slate-600 text-sm">No data yet - start with Sunday Ledger</div>}</div></CardContent></Card>
-        <Card><CardHeader><h3 className="text-sm font-semibold text-slate-200">Baptism Distribution</h3></CardHeader><CardContent><div className="h-64"><ResponsiveContainer width="100%" height="100%"><RechartsPieChart><Pie data={financeData} cx="50%" cy="50%" innerRadius={55} outerRadius={85} dataKey="value" label={({name, percent})=>`${name} ${((percent||0)*100).toFixed(0)}%`}>{financeData.map((_, idx)=> <Cell key={idx} fill={['#06b6d4','#f59e0b','#6366f1'][idx%3]} />)}</Pie><Tooltip contentStyle={{background:'#0f172a'}}/></RechartsPieChart></ResponsiveContainer></div></CardContent></Card>
+        <Card className="lg:col-span-2"><CardHeader><h3 className="text-sm font-semibold text-slate-200 flex items-center gap-2"><Activity className="w-4 h-4 text-indigo-400" /> Weekly Attendance Trend</h3></CardHeader><CardContent><div className="h-64">{attendanceTrend.length>0 ? <ResponsiveContainer width="100%" height="100%"><AreaChart data={attendanceTrend}><CartesianGrid strokeDasharray="3 3" stroke="#1e293b" /><XAxis dataKey="week" stroke="#475569" tick={{fontSize:11}}/><YAxis stroke="#475569" tick={{fontSize:11}}/><Tooltip contentStyle={{background:'#0f172a',border:'1px solid #334155',borderRadius:'8px'}}/><Area type="monotone" dataKey="attendance" stroke="#6366f1" fill="#6366f1" fillOpacity={0.2} /></AreaChart></ResponsiveContainer> : <div className="h-full flex items-center justify-center text-slate-600 text-sm font-sans">No attendance data yet - log in Sunday Ledger</div>}</div></CardContent></Card>
+        <Card><CardHeader><h3 className="text-sm font-semibold text-slate-200">Giving Breakdown (TZS)</h3></CardHeader><CardContent><div className="h-64"><ResponsiveContainer width="100%" height="100%"><RechartsPieChart><Pie data={financeData} cx="50%" cy="50%" innerRadius={55} outerRadius={85} dataKey="value" label={({name, percent})=>`${name} ${((percent||0)*100).toFixed(0)}%`}>{financeData.map((_, idx)=> <Cell key={idx} fill={['#10b981','#8b5cf6','#f59e0b'][idx%3]} />)}</Pie><Tooltip contentStyle={{background:'#0f172a'}}/></RechartsPieChart></ResponsiveContainer></div></CardContent></Card>
       </div>
     </div>
   );
@@ -680,8 +780,8 @@ function ConvertsPage(){
 
 function CommunicationsHub() {
   const { db, showToast, apiFetch, refresh } = useApp();
-  const { churches, members, communicationLogs, regionNotices } = db;
-  const [activeTab, setActiveTab] = useState<'notices' | 'sms' | 'email' | 'history'>('notices');
+  const { churches, members, communicationLogs, regionNotices, todoTasks } = db;
+  const [activeTab, setActiveTab] = useState<'notices' | 'todos' | 'sms' | 'email' | 'history'>('notices');
 
   // 1. Notice Board State
   const [showNoticeModal, setShowNoticeModal] = useState(false);
@@ -697,13 +797,27 @@ function CommunicationsHub() {
   };
   const [noticeForm, setNoticeForm] = useState<any>(emptyNoticeForm);
 
-  // 2. Bulk SMS State
+  // 2. To-Do Tasks State
+  const [showTodoModal, setShowTodoModal] = useState(false);
+  const [editingTodoId, setEditingTodoId] = useState<number | null>(null);
+  const emptyTodoForm = {
+    task: '',
+    assignedTo: 'All Leaders',
+    priority: 'Medium',
+    dueDate: new Date().toISOString().split('T')[0],
+    status: 'Pending',
+    churchId: '',
+    notes: ''
+  };
+  const [todoForm, setTodoForm] = useState<any>(emptyTodoForm);
+
+  // 3. Bulk SMS State
   const [smsTargetGroup, setSmsTargetGroup] = useState('pastors');
   const [smsChurchFilter, setSmsChurchFilter] = useState('');
   const [smsMessage, setSmsMessage] = useState('');
   const [dispatchingSms, setDispatchingSms] = useState(false);
 
-  // 3. Email Outreach State
+  // 4. Email Outreach State
   const [emailSubject, setEmailSubject] = useState('');
   const [emailTemplate, setEmailTemplate] = useState('');
   const [emailMessage, setEmailMessage] = useState('');
@@ -760,6 +874,70 @@ function CommunicationsHub() {
     try {
       await apiFetch(`/region-notices/${id}`, { method: 'DELETE' });
       showToast('Notice Deleted', 'success');
+      refresh();
+    } catch (err: any) { showToast(err.message, 'error'); }
+  };
+
+  // To-Do Tasks interactions
+  const handleTodoSubmit = async (e: any) => {
+    e.preventDefault();
+    if (!todoForm.task) {
+      showToast('Please enter the executable Task Goal', 'error');
+      return;
+    }
+
+    const payload = {
+      ...todoForm,
+      churchId: todoForm.churchId ? parseInt(todoForm.churchId) : null,
+      dueDate: todoForm.dueDate ? new Date(todoForm.dueDate).toISOString() : null,
+      updatedAt: new Date().toISOString()
+    };
+
+    try {
+      if (editingTodoId) {
+        await apiFetch(`/todo-tasks/${editingTodoId}`, { method: 'PUT', body: JSON.stringify(payload) });
+        showToast('To-Do Task Updated Successfully', 'success');
+      } else {
+        await apiFetch('/todo-tasks', { method: 'POST', body: JSON.stringify(payload) });
+        await apiFetch('/audit-logs', { method: 'POST', body: JSON.stringify({ action: 'todo_created', details: `Task: ${todoForm.task}`, timestamp: new Date().toISOString() }) });
+        showToast('Actionable Execution Task Assigned Successfully', 'success');
+      }
+      setShowTodoModal(false);
+      setEditingTodoId(null);
+      setTodoForm(emptyTodoForm);
+      refresh();
+    } catch (err: any) { showToast(err.message, 'error'); }
+  };
+
+  const startEditTodo = (t: any) => {
+    const toD = (v: any) => v ? new Date(v).toISOString().split('T')[0] : '';
+    setTodoForm({
+      task: t.task || '',
+      assignedTo: t.assignedTo || 'All Leaders',
+      priority: t.priority || 'Medium',
+      dueDate: toD(t.dueDate),
+      status: t.status || 'Pending',
+      churchId: t.churchId ? String(t.churchId) : '',
+      notes: t.notes || ''
+    });
+    setEditingTodoId(t.id);
+    setShowTodoModal(true);
+  };
+
+  const deleteTodo = async (id: number) => {
+    if (!confirm('Permanently Delete this execution Task?')) return;
+    try {
+      await apiFetch(`/todo-tasks/${id}`, { method: 'DELETE' });
+      showToast('Task Deleted', 'success');
+      refresh();
+    } catch (err: any) { showToast(err.message, 'error'); }
+  };
+
+  const toggleTaskDone = async (task: any) => {
+    const nStatus = task.status === 'Completed' ? 'Pending' : 'Completed';
+    try {
+      await apiFetch(`/todo-tasks/${task.id}`, { method: 'PUT', body: JSON.stringify({ ...task, status: nStatus, updatedAt: new Date().toISOString() }) });
+      showToast(`Task marked as ${nStatus}`, 'success');
       refresh();
     } catch (err: any) { showToast(err.message, 'error'); }
   };
@@ -848,6 +1026,7 @@ function CommunicationsHub() {
   };
 
   const sortedNotices = (regionNotices || []).sort((a: any, b: any) => new Date(b.datePosted).getTime() - new Date(a.datePosted).getTime());
+  const sortedTodos = (todoTasks || []).sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   const sortedCommHistory = (communicationLogs || []).sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
   return (
@@ -855,41 +1034,49 @@ function CommunicationsHub() {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-100 flex items-center gap-3">
-            <Megaphone className="w-6 h-6 text-indigo-400" /> Communications &amp; Regional Executive Notice Board
+            <Megaphone className="w-6 h-6 text-indigo-400" /> Communications, Notice Board &amp; Network To-Do Tasks List
           </h1>
           <p className="text-sm text-slate-500 mt-1">
-            Link churches with Pastor mobile numbers for Bulk SMS • Email campaigns • Regional Executive Notice Board with full Edit/Save Actions
+            Regional executive notice board • Actionable executive network execution tasks list • Link branch pastor phones for Bulk SMS
           </p>
         </div>
 
-        <div className="flex bg-slate-800/90 rounded-xl border border-slate-700 p-1 font-medium text-xs">
+        {/* Workspace switch mode */}
+        <div className="flex bg-slate-800/90 rounded-xl border border-slate-700 p-1 font-medium text-xs shadow-lg">
           <button
             onClick={() => setActiveTab('notices')}
-            className={`px-3.5 py-2 rounded-lg transition-all flex items-center gap-2 ${activeTab === 'notices' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+            className={`px-3 py-2 rounded-lg transition-all flex items-center gap-1.5 ${activeTab === 'notices' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
           >
-            <Pin className="w-3.5 h-3.5" /> Notice Board ({sortedNotices.length})
+            <Pin className="w-3.5 h-3.5" /> Notices ({sortedNotices.length})
+          </button>
+          <button
+            onClick={() => setActiveTab('todos')}
+            className={`px-3 py-2 rounded-lg transition-all flex items-center gap-1.5 ${activeTab === 'todos' ? 'bg-amber-500 text-slate-950 font-bold shadow' : 'text-slate-400 hover:text-slate-200'}`}
+          >
+            <ListTodo className="w-3.5 h-3.5" /> To-Do List ({sortedTodos.filter((t:any) => t.status !== 'Completed').length})
           </button>
           <button
             onClick={() => setActiveTab('sms')}
-            className={`px-3.5 py-2 rounded-lg transition-all flex items-center gap-2 ${activeTab === 'sms' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+            className={`px-3 py-2 rounded-lg transition-all flex items-center gap-1.5 ${activeTab === 'sms' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
           >
             <Smartphone className="w-3.5 h-3.5" /> Bulk SMS Outbox
           </button>
           <button
             onClick={() => setActiveTab('email')}
-            className={`px-3.5 py-2 rounded-lg transition-all flex items-center gap-2 ${activeTab === 'email' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+            className={`px-3 py-2 rounded-lg transition-all flex items-center gap-1.5 ${activeTab === 'email' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
           >
             <Mail className="w-3.5 h-3.5" /> Official Email Outreach
           </button>
           <button
             onClick={() => setActiveTab('history')}
-            className={`px-3.5 py-2 rounded-lg transition-all flex items-center gap-2 ${activeTab === 'history' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+            className={`px-3 py-2 rounded-lg transition-all flex items-center gap-1.5 ${activeTab === 'history' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
           >
             <Database className="w-3.5 h-3.5" /> Broadcast Archive ({sortedCommHistory.length})
           </button>
         </div>
       </div>
 
+      {/* 1. Regional Executive Notice Board */}
       {activeTab === 'notices' && (
         <div className="space-y-6">
           <div className="flex items-center justify-between">
@@ -947,6 +1134,83 @@ function CommunicationsHub() {
         </div>
       )}
 
+      {/* 2. Discipleship & Network Execution To-Do Tasks List Workspace */}
+      {activeTab === 'todos' && (
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-bold text-amber-400 flex items-center gap-2 tracking-tight">
+              <ListTodo className="w-5 h-5 text-amber-400" /> Actionable Execution Goals &amp; Network To-Do List (Viashiria na Utekelezaji)
+            </h2>
+            <Button variant="success" icon={Plus} size="md" className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold" onClick={() => { setEditingTodoId(null); setTodoForm(emptyTodoForm); setShowTodoModal(true); }}>
+              📝 Assign New Actionable Task Goal
+            </Button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {sortedTodos.length > 0 ? sortedTodos.map((task: any, idx: number) => {
+              const ch = (churches || []).find((c: any) => c.id === task.churchId);
+              const isDone = task.status === 'Completed';
+              const isProg = task.status === 'In Progress';
+              return (
+                <div key={idx} className={`bg-slate-900/90 rounded-2xl border p-5 flex flex-col justify-between shadow-xl relative transition-all ${isDone ? 'border-emerald-800/60 opacity-70 bg-emerald-950/10' : isProg ? 'border-amber-500/80 ring-2 ring-amber-500/20' : 'border-slate-800/80 hover:border-slate-700'}`}>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <Badge variant={isDone ? 'success' : isProg ? 'warning' : 'default'} className="text-[10px] font-mono">
+                        {task.status}
+                      </Badge>
+                      <Badge variant={task.priority === 'High' ? 'danger' : task.priority === 'Medium' ? 'warning' : 'info'} className="text-[10px]">
+                        {task.priority} Priority
+                      </Badge>
+                    </div>
+
+                    <div className="flex items-start gap-3 pt-1">
+                      <button
+                        onClick={() => toggleTaskDone(task)}
+                        className={`mt-0.5 p-1.5 rounded-lg border transition-all cursor-pointer ${isDone ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow' : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'}`}
+                        title={isDone ? 'Click to mark Pending' : 'Click to mark Completed'}
+                      >
+                        <Check className="w-4 h-4" />
+                      </button>
+                      <div>
+                        <h3 className={`text-base font-bold tracking-tight ${isDone ? 'text-slate-400 line-through' : 'text-slate-100'}`}>{task.task}</h3>
+                        <span className="text-[11px] font-bold text-indigo-300 block mt-0.5">Assigned to: {task.assignedTo || 'All Leaders'}</span>
+                      </div>
+                    </div>
+
+                    {task.notes && (
+                      <p className="text-xs text-slate-300 whitespace-pre-wrap leading-relaxed bg-slate-950/40 p-3 rounded-xl border border-slate-800/50 font-sans">
+                        {task.notes}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="space-y-3 pt-4 mt-4 border-t border-slate-800/60 text-xs text-slate-400">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] text-slate-400 truncate">{ch ? `Branch: ${ch.name}` : 'Shared Network'}</span>
+                      {task.dueDate && <span className="font-mono text-amber-300 text-[11px]">🎯 Due: {new Date(task.dueDate).toLocaleDateString()}</span>}
+                    </div>
+                    <div className="flex items-center justify-between pt-1">
+                      <span className="text-[10px] font-mono text-slate-500">Created: {new Date(task.createdAt).toLocaleDateString()}</span>
+                      <div className="flex items-center gap-2">
+                        <Button variant="ghost" size="xs" icon={Edit3} onClick={() => startEditTodo(task)}>Edit</Button>
+                        <Button variant="ghost" size="xs" icon={Trash2} onClick={() => deleteTodo(task.id)} className="text-red-400 hover:text-red-300 hover:bg-red-950">Delete</Button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            }) : (
+              <div className="col-span-full py-16 text-center text-slate-600 bg-slate-900/40 rounded-2xl border border-slate-800">
+                <ListTodo className="w-12 h-12 mx-auto mb-3 text-slate-700 opacity-60" />
+                <p className="font-bold text-base text-slate-400">No Actionable Network Tasks Logged</p>
+                <p className="text-xs text-slate-500 mt-1">Click "Assign New Actionable Task Goal" to schedule strategic targets, discipleship goals, or financial mandates.</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 3. Instant Bulk SMS Portal */}
       {activeTab === 'sms' && (
         <div className="grid grid-cols-1 lg:grid-cols-7 gap-6">
           <Card className="lg:col-span-4 bg-slate-900/90 border-slate-800 shadow-2xl">
@@ -983,7 +1247,7 @@ function CommunicationsHub() {
 
                 <div className="space-y-2">
                   <div className="flex items-center justify-between text-xs font-bold text-slate-300 uppercase tracking-wider">
-                    <span>Target Target Recipient Mobile Database ({smsRecipients.length} Verified Contacts)</span>
+                    <span>Target Recipient Mobile Database ({smsRecipients.length} Verified Contacts)</span>
                     <span className="text-emerald-400 font-mono">Simulating Proxy Dispatch</span>
                   </div>
                   <div className="max-h-36 overflow-y-auto bg-slate-950/60 p-3 rounded-xl border border-slate-800 space-y-1.5 font-mono text-xs">
@@ -1033,7 +1297,7 @@ function CommunicationsHub() {
                   <Badge variant="success" className="font-mono">Ready Operational</Badge>
                 </div>
                 <div className="p-3 bg-slate-800/40 rounded-xl border border-slate-700/50 flex items-center justify-between">
-                  <span>Registered Target Church Branches Linked:</span>
+                  <span>Registered Church Branches Linked:</span>
                   <span className="font-bold text-white font-mono">{churches?.length || 0} Synced</span>
                 </div>
                 <div className="p-3 bg-slate-800/40 rounded-xl border border-slate-700/50 flex items-center justify-between">
@@ -1049,13 +1313,16 @@ function CommunicationsHub() {
         </div>
       )}
 
+      {/* 4. Official Email Hub */}
       {activeTab === 'email' && (
         <Card className="max-w-4xl bg-slate-900/90 border-slate-800 shadow-2xl">
-          <CardHeader className="bg-indigo-950/30">
-            <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
-              <Mail className="w-5 h-5 text-indigo-400" /> Executive Official Bishop Campaign Outbox
-            </h3>
-            <p className="text-xs text-slate-400 mt-0.5">Transmit formal executive regional synod notices, financial protocols, or discipleship mandates</p>
+          <CardHeader className="bg-indigo-950/30 flex justify-between items-center">
+            <div>
+              <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
+                <Mail className="w-5 h-5 text-indigo-400" /> Official Bishop Executive Outreach &amp; Email Campaign Hub
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">Transmit formal regional synod circulars, strategic financial circulars, or discipleship mandates</p>
+            </div>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleDispatchEmail} className="space-y-5">
@@ -1064,33 +1331,33 @@ function CommunicationsHub() {
                 options={[
                   { value: '', label: '— Compose New Custom Campaign —' },
                   { value: 'Synod Notice: Ultimate Executive Regional synod Conference this week. Please bring all respective Branch Quarter Reports.', label: '🏛️ Formal Synod Circular Invitation' },
-                  { value: 'Stewardship Notice: Core network financial protocol updated. Primary operational currency is TZS. Please complete collection ledgers.', label: '💰 Universal Network Stewardship Mandate' },
-                  { value: 'Discipleship Bulletin: High-priority discipleship new convert progress tracking required for all zone cell leaders.', label: '🕊️ Discipleship Discipleship Protocol' }
+                  { value: 'Stewardship Notice: Baseline regional giving configuration updated. Primary operational currency is TZS. Please submit collection ledgers.', label: '💰 Universal Network Stewardship Update' },
+                  { value: 'Discipleship Bulletin: High-priority discipleship new convert progress tracking required for all zone cell leaders.', label: '🕊️ New Convert Discipleship Discipleship Protocol' }
                 ]}
                 value={emailTemplate}
                 onChange={(e: any) => {
                   const t = e.target.value;
                   setEmailTemplate(t);
                   if (t) {
-                    setEmailSubject('DoxaRealm Executive Discipleship Hub Campaign Circular');
+                    setEmailSubject('DoxaRealm Executive Oversight Hub Campaign Circular');
                     setEmailMessage(t);
                   }
                 }}
               />
 
               <Input
-                label="Email Campaign Subject *"
-                placeholder="e.g. Discipleship Discipleship Oversight Executive Circular..."
+                label="Formal Email Campaign Subject *"
+                placeholder="e.g. Bishop Office Formal Discipleship Mandatory Circular..."
                 value={emailSubject}
                 onChange={(e: any) => setEmailSubject(e.target.value)}
                 required
               />
 
               <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">Formal HTML Message Body Content *</label>
+                <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">Formal HTML Email Body Content *</label>
                 <textarea
                   rows={8}
-                  placeholder="Compose your definitive executive circular campaign HTML body here..."
+                  placeholder="Compose your comprehensive executive outreach HTML circular here..."
                   value={emailMessage}
                   onChange={(e: any) => setEmailMessage(e.target.value)}
                   required
@@ -1099,18 +1366,19 @@ function CommunicationsHub() {
               </div>
 
               <Button type="submit" variant="primary" icon={Rocket} size="lg" disabled={dispatchingEmail} className="w-full py-3.5 text-base font-bold shadow-xl">
-                {dispatchingEmail ? 'Transmitting Official Campaign via Outbox Proxy...' : '🚀 Trigger Final Delivery to All Registered Network Emails'}
+                {dispatchingEmail ? 'Executing Outbox Email Delivery Gateway Operation...' : '🚀 Trigger Universal Network-Wide Email Delivery Campaign'}
               </Button>
             </form>
           </CardContent>
         </Card>
       )}
 
+      {/* 5. Broadcast History Archive */}
       {activeTab === 'history' && (
         <Card className="bg-slate-900/90 border-slate-800">
           <CardHeader>
             <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
-              <Database className="w-5 h-5 text-teal-400" /> Complete Communication &amp; Campaign Broadcast Archives
+              <Database className="w-5 h-5 text-teal-400" /> Complete Master Communication Logs Archive
             </h3>
           </CardHeader>
           <CardContent>
@@ -1121,8 +1389,8 @@ function CommunicationsHub() {
                     <th className="py-2.5 px-3">Date Dispatched</th>
                     <th className="py-2.5 px-3">Campaign Channel</th>
                     <th className="py-2.5 px-3">Sender Office</th>
-                    <th className="py-2.5 px-3">Target Target Receivers</th>
-                    <th className="py-2.5 px-3">Message Subject / Text Content Summary</th>
+                    <th className="py-2.5 px-3">Target Receivers</th>
+                    <th className="py-2.5 px-3">Message Subject / Content Summary</th>
                     <th className="py-2.5 px-3 font-bold text-indigo-300">Status</th>
                   </tr>
                 </thead>
@@ -1131,14 +1399,14 @@ function CommunicationsHub() {
                     <tr key={i} className="hover:bg-slate-800/30">
                       <td className="py-3 px-3 text-slate-400 font-mono">{new Date(c.date).toLocaleString()}</td>
                       <td className="py-3 px-3"><Badge variant={c.type?.includes('SMS') ? 'success' : 'primary'}>{c.type}</Badge></td>
-                      <td className="py-3 px-3 font-medium text-slate-200">{c.senderName || 'Executive Strategic Support'}</td>
-                      <td className="py-3 px-3 text-indigo-300 font-medium">{c.recipientId || 'All Deployed Sub-Units'}</td>
+                      <td className="py-3 px-3 font-medium text-slate-200">{c.senderName || 'Executive Strategic Oversight'}</td>
+                      <td className="py-3 px-3 text-indigo-300 font-medium">{c.recipientId || 'All Shared Network Units'}</td>
                       <td className="py-3 px-3 text-slate-300 max-w-xs truncate">{c.subject || c.message || '—'}</td>
                       <td className="py-3 px-3"><Badge variant="info" className="font-mono">{c.status || 'Proxy Transmitted'}</Badge></td>
                     </tr>
                   )) : (
                     <tr>
-                      <td colSpan={6} className="py-12 text-center text-slate-600">No official messages or SMS campaigns recorded yet.</td>
+                      <td colSpan={6} className="py-12 text-center text-slate-600">No formal official outreach messages or Bulk SMS recorded yet.</td>
                     </tr>
                   )}
                 </tbody>
@@ -1148,25 +1416,49 @@ function CommunicationsHub() {
         </Card>
       )}
 
-      {/* Notice Board Executive Complete Interactive Edit / Creation Modal */}
-      <Modal open={showNoticeModal} onClose={() => { setShowNoticeModal(false); setEditingNoticeId(null); setNoticeForm(emptyNoticeForm); }} title={editingNoticeId ? "Edit Published Active Regional Notice" : "📌 Post Strategic Regional Executive Announcement"} size="md">
+      {/* Notice Edit / Creation Modal */}
+      <Modal open={showNoticeModal} onClose={() => { setShowNoticeModal(false); setEditingNoticeId(null); setNoticeForm(emptyNoticeForm); }} title={editingNoticeId ? "Edit Published Active Notice" : "📌 Post Strategic Regional Notice"} size="md">
         <form onSubmit={handleNoticeSubmit} className="space-y-5">
-          <Input label="Notice Title (Kichwa Cha Ujumbe) *" value={noticeForm.title} onChange={(e: any) => setNoticeForm({ ...noticeForm, title: e.target.value })} required placeholder="Urgent General Synod Mandate next week..." />
+          <Input label="Notice Title (Kichwa Cha Taarifa) *" value={noticeForm.title} onChange={(e: any) => setNoticeForm({ ...noticeForm, title: e.target.value })} required placeholder="Urgent General Synod Request next week..." />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Select label="Priority Rating *" options={['Normal', 'Urgent']} value={noticeForm.priority} onChange={(e: any) => setNoticeForm({ ...noticeForm, priority: e.target.value })} required />
             <Select label="Notice Category *" options={['General', 'Discipleship', 'Emergency', 'Meetings', 'Finance']} value={noticeForm.category} onChange={(e: any) => setNoticeForm({ ...noticeForm, category: e.target.value })} required />
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Input label="Author Officer Credentials" value={noticeForm.authorName} onChange={(e: any) => setNoticeForm({ ...noticeForm, authorName: e.target.value })} placeholder="Executive Oversight / Mkoa Oversight..." />
-            <Select label="Target Church Isolation Branch" options={[{ value: '', label: '— Shared Network-Wide —' }, ...(churches || []).map((c: any) => ({ value: c.id, label: c.name }))]} value={noticeForm.churchId} onChange={(e: any) => setNoticeForm({ ...noticeForm, churchId: e.target.value })} />
+            <Input label="Author Executive Credentials" value={noticeForm.authorName} onChange={(e: any) => setNoticeForm({ ...noticeForm, authorName: e.target.value })} placeholder="Bishop Office / Executive Katibu..." />
+            <Select label="Related Target Branch Isolation" options={[{ value: '', label: '— Universal Network-Wide —' }, ...(churches || []).map((c: any) => ({ value: c.id, label: c.name }))]} value={noticeForm.churchId} onChange={(e: any) => setNoticeForm({ ...noticeForm, churchId: e.target.value })} />
           </div>
           <div className="space-y-1.5">
-            <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">Notice Board Complete Content (Ujumbe Kamili) *</label>
-            <textarea rows={7} value={noticeForm.content} onChange={(e: any) => setNoticeForm({ ...noticeForm, content: e.target.value })} required placeholder="Type definitive detailed instructions or synod meeting parameters exactly..." className="w-full bg-slate-950 border-2 border-indigo-500/80 rounded-xl p-4 text-sm text-slate-100 focus:outline-none focus:ring-4 focus:ring-indigo-500/30 leading-relaxed font-sans" />
+            <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">Notice Complete Content (Ujumbe Kamili) *</label>
+            <textarea rows={7} value={noticeForm.content} onChange={(e: any) => setNoticeForm({ ...noticeForm, content: e.target.value })} required placeholder="Type the formal executive notice parameters exactly..." className="w-full bg-slate-950 border-2 border-indigo-500/80 rounded-xl p-4 text-sm text-slate-100 focus:outline-none focus:ring-4 focus:ring-indigo-500/30 leading-relaxed font-sans" />
           </div>
           <div className="flex justify-end gap-3 pt-3 border-t border-slate-800">
             <Button variant="ghost" type="button" onClick={() => { setShowNoticeModal(false); setEditingNoticeId(null); setNoticeForm(emptyNoticeForm); }}>Cancel</Button>
-            <Button type="submit" variant="primary" icon={Save} size="lg">{editingNoticeId ? 'Publish Adjusted Notice' : 'Broadcast Final Notice to All Regional Leaders'}</Button>
+            <Button type="submit" variant="primary" icon={Save} size="lg">{editingNoticeId ? 'Update Notice Changes' : 'Broadcast Final Notice to All Regional Leaders'}</Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* To-Do Task Edit / Creation Modal */}
+      <Modal open={showTodoModal} onClose={() => { setShowTodoModal(false); setEditingTodoId(null); setTodoForm(emptyTodoForm); }} title={editingTodoId ? "Edit Execution Network Task Goal" : "📝 Assign Strategic Actionable Execution Task Goal"} size="md">
+        <form onSubmit={handleTodoSubmit} className="space-y-5 font-sans">
+          <Input label="Task Goal Summary (Lengo Mahususi) *" value={todoForm.task} onChange={(e: any) => setTodoForm({ ...todoForm, task: e.target.value })} required placeholder="Submit precise quarterly collection financial reports..." />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Select label="Priority *" options={['Low', 'Medium', 'High']} value={todoForm.priority} onChange={(e: any) => setTodoForm({ ...todoForm, priority: e.target.value })} required />
+            <Input label="Target Due Date" type="date" value={todoForm.dueDate} onChange={(e: any) => setTodoForm({ ...todoForm, dueDate: e.target.value })} />
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Input label="Assigned Executive Role / Name" value={todoForm.assignedTo} onChange={(e: any) => setTodoForm({ ...todoForm, assignedTo: e.target.value })} placeholder="All Pastors, Katibu Mkoa, Treasurer..." />
+            <Select label="Target Target Branch Support" options={[{ value: '', label: '— Entire Target Network —' }, ...(churches || []).map((c: any) => ({ value: c.id, label: c.name }))]} value={todoForm.churchId} onChange={(e: any) => setTodoForm({ ...todoForm, churchId: e.target.value })} />
+          </div>
+          <Select label="Task Status" options={['Pending', 'In Progress', 'Completed']} value={todoForm.status} onChange={(e: any) => setTodoForm({ ...todoForm, status: e.target.value })} />
+          <div className="space-y-1.5">
+            <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">Detailed Execution Instructions (Maelezo ya Utekelezaji)</label>
+            <textarea rows={4} value={todoForm.notes} onChange={(e: any) => setTodoForm({ ...todoForm, notes: e.target.value })} placeholder="Type specific deliverable key deliverable directives, synod benchmarks, or follow-up parameters..." className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/40 font-sans" />
+          </div>
+          <div className="flex justify-end gap-3 pt-3 border-t border-slate-800">
+            <Button variant="ghost" type="button" onClick={() => { setShowTodoModal(false); setEditingTodoId(null); setTodoForm(emptyTodoForm); }}>Cancel</Button>
+            <Button variant="success" type="submit" icon={Save} size="lg" className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold">{editingTodoId ? 'Update Actionable Execution Goal' : 'Confirm &amp; Broadcast Actionable Execution Task'}</Button>
           </div>
         </form>
       </Modal>
