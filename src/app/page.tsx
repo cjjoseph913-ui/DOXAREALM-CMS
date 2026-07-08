@@ -415,6 +415,16 @@ function Directory() {
     setShowForm(true);
   };
 
+  const deleteMember = async (m: any) => {
+    if (!confirm(`Permanently delete "${m.name}"? This cannot be undone.`)) return;
+    try {
+      await apiFetch(`/members/${m.id}`, { method: 'DELETE' });
+      await apiFetch('/audit-logs', { method: 'POST', body: JSON.stringify({ action: 'member_deleted', details: `Deleted member: ${m.name} (ID: ${m.id})`, timestamp: new Date().toISOString() }) });
+      showToast(`Member "${m.name}" deleted`, 'success');
+      refresh();
+    } catch (err: any) { showToast('Delete failed: ' + err.message, 'error'); }
+  };
+
   const handleSubmit = async (e:any) => {
     e.preventDefault();
     if (!form.name) { showToast('Name required','error'); return; }
@@ -479,7 +489,7 @@ function Directory() {
                     <td className="px-4 py-3"><Badge variant={m.waterBaptismStatus==='Baptized' ? 'success' : m.waterBaptismStatus==='Not Baptized' ? 'default' : 'warning'}><Droplets className="w-3 h-3" />{m.waterBaptismStatus||'Not Baptized'}</Badge>{m.waterBaptismDate && <div className="text-[10px] text-slate-600 mt-1">{new Date(m.waterBaptismDate).toLocaleDateString()}</div>}</td>
                     <td className="px-4 py-3"><Badge variant={m.holySpiritBaptismStatus==='Baptized' ? 'success' : m.holySpiritBaptismStatus==='Not Baptized' ? 'default' : 'info'}><Flame className="w-3 h-3" />{m.holySpiritBaptismStatus||'Not Baptized'}</Badge>{m.holySpiritBaptismDate && <div className="text-[10px] text-slate-600 mt-1">{new Date(m.holySpiritBaptismDate).toLocaleDateString()}</div>}</td>
                     <td className="px-4 py-3"><Badge variant={m.status==='Active'?'success':'default'}>{m.status}</Badge></td>
-                    <td className="px-4 py-3 text-right"><Button variant="ghost" size="xs" icon={Edit3} onClick={()=>startEdit(m)}>Edit</Button></td>
+                    <td className="px-4 py-3 text-right"><div className="flex gap-2 justify-end"><Button variant="ghost" size="xs" icon={Edit3} onClick={()=>startEdit(m)}>Edit</Button><Button variant="danger" size="xs" icon={Trash2} onClick={()=>deleteMember(m)}>Delete</Button></div></td>
                   </tr>
                 );
               }) : <tr><td colSpan={8} className="px-4 py-12 text-center text-slate-600">No members found. Register your first member.</td></tr>}
