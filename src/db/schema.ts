@@ -140,12 +140,29 @@ export const attendanceLogs = pgTable("attendance_logs", {
 export const communicationLogs = pgTable("communication_logs", {
   id: serial("id").primaryKey(),
   type: text("type"),
+  churchId: integer("church_id"),
+  senderName: text("sender_name"),
   recipientId: text("recipient_id"),
   subject: text("subject"),
   message: text("message"),
   template: text("template"),
+  status: text("status").default("Sent"),
   date: timestamp("date").defaultNow(),
   timestamp: timestamp("timestamp").defaultNow(),
+});
+
+export const regionNotices = pgTable("region_notices", {
+  id: serial("id").primaryKey(),
+  title: text("title").notNull(),
+  category: text("category").default("General"),
+  priority: text("priority").default("Normal"),
+  targetRoles: jsonb("target_roles").default(["All Leaders"]),
+  content: text("content").notNull(),
+  authorName: text("author_name"),
+  authorRole: text("author_role"),
+  churchId: integer("church_id"),
+  datePosted: timestamp("date_posted").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
 });
 
 export const auditLogs = pgTable("audit_logs", {

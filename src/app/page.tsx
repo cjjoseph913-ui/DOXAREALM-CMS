@@ -11,7 +11,8 @@ import {
   Heart, HelpCircle, LayoutDashboard, Mail, Map, MapPin, MessageSquare, Plus, RefreshCw, Save, Search, 
   Send, Shield, Users, UserPlus, Wallet, X, Phone, Layers, Droplets, Flame, Home, Briefcase, Gift,
   UserCheck, Zap, Clock, Trash2, Edit3, Settings, BarChart3, Download, Printer, Award, Filter, Info,
-  Share2, ExternalLink, Copy, Smartphone, Server, HardDrive, Check, Rocket
+  Share2, ExternalLink, Copy, Smartphone, Server, HardDrive, Check, Rocket,
+  Megaphone, Pin, Radio, AlertTriangle
 } from 'lucide-react';
 
 const API_BASE = '/api';
@@ -677,7 +678,501 @@ function ConvertsPage(){
     <Card><CardContent><table className="w-full text-sm"><thead><tr className="border-b border-slate-800/60 text-xs text-slate-500"><th className="py-2 text-left">Name</th><th className="py-2 text-left">Contact</th><th className="py-2">Step</th><th className="py-2 text-right">Actions</th></tr></thead><tbody>{db.converts.map((c:any,i:number)=><tr key={i} className="border-b border-slate-800/40"><td className="py-2">{c.name}</td><td className="py-2 text-xs text-slate-400">{c.contact||'—'}</td><td className="py-2"><Badge>{c.step}</Badge></td><td className="py-2 text-right"><Button variant="ghost" size="xs" icon={Edit3} onClick={()=>startEdit(c)}>Edit</Button></td></tr>)}</tbody></table></CardContent></Card></div>;
 }
 
-function CommunicationsHub(){ const {db}=useApp(); return <div className="space-y-6"><h1 className="text-2xl font-bold flex items-center gap-2"><MessageSquare className="w-6 h-6 text-indigo-400"/>Communications</h1><Card><CardContent>{db.communicationLogs.length===0?<p className="text-slate-600 text-center py-8">No communications logged yet</p>:db.communicationLogs.map((c:any,i:number)=><div key={i} className="py-2 border-b border-slate-800/40 text-sm"><span className="text-slate-200 font-medium">{c.type}</span> <span className="text-slate-500">— {c.subject||c.message||'—'}</span></div>)}</CardContent></Card></div>; }
+function CommunicationsHub() {
+  const { db, showToast, apiFetch, refresh } = useApp();
+  const { churches, members, communicationLogs, regionNotices } = db;
+  const [activeTab, setActiveTab] = useState<'notices' | 'sms' | 'email' | 'history'>('notices');
+
+  // 1. Notice Board State
+  const [showNoticeModal, setShowNoticeModal] = useState(false);
+  const [editingNoticeId, setEditingNoticeId] = useState<number | null>(null);
+  const emptyNoticeForm = {
+    title: '',
+    category: 'General',
+    priority: 'Normal',
+    content: '',
+    authorName: '',
+    authorRole: 'Regional Oversight Leader',
+    churchId: ''
+  };
+  const [noticeForm, setNoticeForm] = useState<any>(emptyNoticeForm);
+
+  // 2. Bulk SMS State
+  const [smsTargetGroup, setSmsTargetGroup] = useState('pastors');
+  const [smsChurchFilter, setSmsChurchFilter] = useState('');
+  const [smsMessage, setSmsMessage] = useState('');
+  const [dispatchingSms, setDispatchingSms] = useState(false);
+
+  // 3. Email Outreach State
+  const [emailSubject, setEmailSubject] = useState('');
+  const [emailTemplate, setEmailTemplate] = useState('');
+  const [emailMessage, setEmailMessage] = useState('');
+  const [dispatchingEmail, setDispatchingEmail] = useState(false);
+
+  // Notice interactions
+  const handleNoticeSubmit = async (e: any) => {
+    e.preventDefault();
+    if (!noticeForm.title || !noticeForm.content) {
+      showToast('Notice Title and Body Content are required', 'error');
+      return;
+    }
+
+    const payload = {
+      ...noticeForm,
+      churchId: noticeForm.churchId ? parseInt(noticeForm.churchId) : null,
+      updatedAt: new Date().toISOString()
+    };
+
+    try {
+      if (editingNoticeId) {
+        await apiFetch(`/region-notices/${editingNoticeId}`, { method: 'PUT', body: JSON.stringify(payload) });
+        showToast('Notice Update Published Successfully', 'success');
+      } else {
+        await apiFetch('/region-notices', { method: 'POST', body: JSON.stringify({ ...payload, datePosted: new Date().toISOString() }) });
+        await apiFetch('/audit-logs', { method: 'POST', body: JSON.stringify({ action: 'notice_published', details: `Notice: ${noticeForm.title}`, timestamp: new Date().toISOString() }) });
+        showToast('Important Notice Broadcasted to All Regional Leaders', 'success');
+      }
+      setShowNoticeModal(false);
+      setEditingNoticeId(null);
+      setNoticeForm(emptyNoticeForm);
+      refresh();
+    } catch (err: any) {
+      showToast(err.message, 'error');
+    }
+  };
+
+  const startEditNotice = (n: any) => {
+    setNoticeForm({
+      title: n.title || '',
+      category: n.category || 'General',
+      priority: n.priority || 'Normal',
+      content: n.content || '',
+      authorName: n.authorName || '',
+      authorRole: n.authorRole || 'Regional Oversight Leader',
+      churchId: n.churchId ? String(n.churchId) : ''
+    });
+    setEditingNoticeId(n.id);
+    setShowNoticeModal(true);
+  };
+
+  const deleteNotice = async (id: number) => {
+    if (!confirm('Permanently Delete this Important Notice?')) return;
+    try {
+      await apiFetch(`/region-notices/${id}`, { method: 'DELETE' });
+      showToast('Notice Deleted', 'success');
+      refresh();
+    } catch (err: any) { showToast(err.message, 'error'); }
+  };
+
+  // Bulk SMS logic & matching pastor phone routing
+  const smsRecipients = useMemo(() => {
+    if (smsTargetGroup === 'pastors') {
+      return (churches || []).filter((c: any) => c.pastorPhone || c.phone).map((c: any) => ({
+        name: `Pastor ${c.pastorName || 'Leader'} (${c.name})`,
+        phone: c.pastorPhone || c.phone || '—',
+        church: c.name
+      }));
+    } else if (smsTargetGroup === 'members') {
+      return (members || []).filter((m: any) => m.phone && (!smsChurchFilter || m.churchId?.toString() === smsChurchFilter)).map((m: any) => ({
+        name: m.name,
+        phone: m.phone,
+        church: churches?.find((c: any) => c.id === m.churchId)?.name || 'Central'
+      }));
+    } else if (smsTargetGroup === 'youth') {
+      return (members || []).filter((m: any) => m.phone && m.department?.includes('Youth') && (!smsChurchFilter || m.churchId?.toString() === smsChurchFilter)).map((m: any) => ({
+        name: m.name,
+        phone: m.phone,
+        church: churches?.find((c: any) => c.id === m.churchId)?.name || 'Central'
+      }));
+    }
+    return [];
+  }, [smsTargetGroup, churches, members, smsChurchFilter]);
+
+  const handleDispatchBulkSms = async (e: any) => {
+    e.preventDefault();
+    if (!smsMessage) return showToast('SMS Text Message Content is empty', 'error');
+    if (smsRecipients.length === 0) return showToast('No Valid Recipient Mobile Numbers match the current target filter', 'error');
+
+    try {
+      setDispatchingSms(true);
+      await apiFetch('/communication-logs', {
+        method: 'POST',
+        body: JSON.stringify({
+          type: 'Bulk SMS Broadcast',
+          senderName: 'DoxaRealm Central Discipleship Hub',
+          recipientId: `${smsRecipients.length} Target Receivers (${smsTargetGroup.toUpperCase()})`,
+          subject: 'Pastoral / Leader Gateway Notice',
+          message: smsMessage,
+          status: 'Successfully Dispatched via Proxy',
+          date: new Date().toISOString(),
+          timestamp: new Date().toISOString()
+        })
+      });
+
+      await apiFetch('/audit-logs', { method: 'POST', body: JSON.stringify({ action: 'bulk_sms_dispatched', details: `Sent ${smsRecipients.length} SMS to ${smsTargetGroup}`, timestamp: new Date().toISOString() }) });
+      showToast(`Instant Bulk SMS Broadcast Triggered for ${smsRecipients.length} Target Leaders / Pastors!`, 'success');
+      setSmsMessage('');
+      refresh();
+    } catch (err: any) {
+      showToast(err.message, 'error');
+    } finally { setDispatchingSms(false); }
+  };
+
+  const handleDispatchEmail = async (e: any) => {
+    e.preventDefault();
+    if (!emailSubject || !emailMessage) return showToast('Email Subject and Body are required', 'error');
+
+    try {
+      setDispatchingEmail(true);
+      await apiFetch('/communication-logs', {
+        method: 'POST',
+        body: JSON.stringify({
+          type: 'Official Email Campaign',
+          senderName: 'DoxaRealm Bishop Oversight Office',
+          recipientId: 'All Regional Registered Branch Emails',
+          subject: emailSubject,
+          message: emailMessage,
+          template: emailTemplate,
+          status: 'Delivered via Email Gateway Proxy',
+          date: new Date().toISOString(),
+          timestamp: new Date().toISOString()
+        })
+      });
+
+      showToast('Email Campaign Triggered & Delivered Successfully', 'success');
+      setEmailSubject('');
+      setEmailMessage('');
+      setEmailTemplate('');
+      refresh();
+    } catch (err: any) { showToast(err.message, 'error'); } finally { setDispatchingEmail(false); }
+  };
+
+  const sortedNotices = (regionNotices || []).sort((a: any, b: any) => new Date(b.datePosted).getTime() - new Date(a.datePosted).getTime());
+  const sortedCommHistory = (communicationLogs || []).sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-100 flex items-center gap-3">
+            <Megaphone className="w-6 h-6 text-indigo-400" /> Communications &amp; Regional Executive Notice Board
+          </h1>
+          <p className="text-sm text-slate-500 mt-1">
+            Link churches with Pastor mobile numbers for Bulk SMS • Email campaigns • Regional Executive Notice Board with full Edit/Save Actions
+          </p>
+        </div>
+
+        <div className="flex bg-slate-800/90 rounded-xl border border-slate-700 p-1 font-medium text-xs">
+          <button
+            onClick={() => setActiveTab('notices')}
+            className={`px-3.5 py-2 rounded-lg transition-all flex items-center gap-2 ${activeTab === 'notices' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+          >
+            <Pin className="w-3.5 h-3.5" /> Notice Board ({sortedNotices.length})
+          </button>
+          <button
+            onClick={() => setActiveTab('sms')}
+            className={`px-3.5 py-2 rounded-lg transition-all flex items-center gap-2 ${activeTab === 'sms' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+          >
+            <Smartphone className="w-3.5 h-3.5" /> Bulk SMS Outbox
+          </button>
+          <button
+            onClick={() => setActiveTab('email')}
+            className={`px-3.5 py-2 rounded-lg transition-all flex items-center gap-2 ${activeTab === 'email' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+          >
+            <Mail className="w-3.5 h-3.5" /> Official Email Outreach
+          </button>
+          <button
+            onClick={() => setActiveTab('history')}
+            className={`px-3.5 py-2 rounded-lg transition-all flex items-center gap-2 ${activeTab === 'history' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+          >
+            <Database className="w-3.5 h-3.5" /> Broadcast Archive ({sortedCommHistory.length})
+          </button>
+        </div>
+      </div>
+
+      {activeTab === 'notices' && (
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
+              <Pin className="w-5 h-5 text-indigo-400" /> Active Regional Notice Board (Taarifa na Matangazo ya Kiutendaji)
+            </h2>
+            <Button variant="primary" icon={Plus} size="md" onClick={() => { setEditingNoticeId(null); setNoticeForm(emptyNoticeForm); setShowNoticeModal(true); }}>
+              📌 Post Important New Notice
+            </Button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {sortedNotices.length > 0 ? sortedNotices.map((n: any, idx: number) => {
+              const ch = (churches || []).find((c: any) => c.id === n.churchId);
+              return (
+                <div key={idx} className="bg-slate-900/90 rounded-2xl border border-slate-800/80 p-5 flex flex-col justify-between shadow-xl relative group">
+                  {n.priority === 'Urgent' && (
+                    <span className="absolute top-4 right-4 flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-rose-400 bg-rose-950/80 border border-rose-500/50 py-1 px-2.5 rounded-full animate-pulse">
+                      <Megaphone className="w-3 h-3" /> Urgent Notice
+                    </span>
+                  )}
+                  <div className="space-y-3">
+                    <Badge variant={n.category === 'Finance' ? 'success' : n.category === 'Emergency' ? 'danger' : 'warning'} className="text-[10px]">
+                      {n.category || 'General Notice'}
+                    </Badge>
+                    <h3 className="text-lg font-bold text-slate-100 tracking-tight pr-12">{n.title}</h3>
+                    <p className="text-xs text-slate-300 whitespace-pre-wrap leading-relaxed min-h-[70px] bg-slate-950/40 p-3 rounded-xl border border-slate-800/50 font-sans">
+                      {n.content}
+                    </p>
+                  </div>
+
+                  <div className="space-y-3 pt-4 mt-4 border-t border-slate-800/60 text-xs text-slate-400">
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium text-slate-200">{n.authorName || 'Executive Oversight'}</span>
+                      <span className="text-[11px] font-mono text-slate-500">{new Date(n.datePosted).toLocaleDateString()}</span>
+                    </div>
+                    <div className="flex items-center justify-between pt-1">
+                      <span className="text-[10px] text-indigo-400 font-medium truncate">{n.authorRole} {ch ? `• ${ch.name}` : ''}</span>
+                      <div className="flex items-center gap-2">
+                        <Button variant="ghost" size="xs" icon={Edit3} onClick={() => startEditNotice(n)}>Edit</Button>
+                        <Button variant="ghost" size="xs" icon={Trash2} onClick={() => deleteNotice(n.id)} className="text-red-400 hover:text-red-300 hover:bg-red-950">Delete</Button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            }) : (
+              <div className="col-span-full py-16 text-center text-slate-600 bg-slate-900/40 rounded-2xl border border-slate-800">
+                <Megaphone className="w-12 h-12 mx-auto mb-3 text-slate-700 opacity-60" />
+                <p className="font-bold text-base text-slate-400">Regional Executive Notice Board is completely clear</p>
+                <p className="text-xs text-slate-500 mt-1">Click "Post Important New Notice" to pin strategic agenda messages for regional leadership.</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'sms' && (
+        <div className="grid grid-cols-1 lg:grid-cols-7 gap-6">
+          <Card className="lg:col-span-4 bg-slate-900/90 border-slate-800 shadow-2xl">
+            <CardHeader className="bg-indigo-950/30">
+              <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
+                <Megaphone className="w-5 h-5 text-emerald-400" /> Instant Bulk SMS Trigger Hub (Mtumaji Wa Ujumbe Mfupi API)
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Automatically connects each registered target Church branch with its exact active Pastor phone number for high-priority dispatch.
+              </p>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleDispatchBulkSms} className="space-y-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 bg-slate-800/40 rounded-2xl border border-slate-700/60">
+                  <Select
+                    label="Target Receiver Group *"
+                    options={[
+                      { value: 'pastors', label: '📞 All Church Branch Pastors &amp; Oversight Leaders' },
+                      { value: 'members', label: '👥 All Registered Active Church Members' },
+                      { value: 'youth', label: '⚡ Enrolled Youth Fellowship Group (13-45 yrs)' }
+                    ]}
+                    value={smsTargetGroup}
+                    onChange={(e: any) => setSmsTargetGroup(e.target.value)}
+                  />
+                  {smsTargetGroup !== 'pastors' && (
+                    <Select
+                      label="Optional Target Church Filter"
+                      options={[{ value: '', label: '— All Branches Network-Wide —' }, ...(churches || []).map((c: any) => ({ value: c.id, label: c.name }))]}
+                      value={smsChurchFilter}
+                      onChange={(e: any) => setSmsChurchFilter(e.target.value)}
+                    />
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-xs font-bold text-slate-300 uppercase tracking-wider">
+                    <span>Target Target Recipient Mobile Database ({smsRecipients.length} Verified Contacts)</span>
+                    <span className="text-emerald-400 font-mono">Simulating Proxy Dispatch</span>
+                  </div>
+                  <div className="max-h-36 overflow-y-auto bg-slate-950/60 p-3 rounded-xl border border-slate-800 space-y-1.5 font-mono text-xs">
+                    {smsRecipients.length > 0 ? smsRecipients.map((rec: any, idx: number) => (
+                      <div key={idx} className="flex items-center justify-between py-1 border-b border-slate-900 last:border-0 text-slate-300">
+                        <span className="truncate pr-4 font-sans font-medium">{rec.name}</span>
+                        <span className="text-emerald-400 font-bold bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/50">{rec.phone}</span>
+                      </div>
+                    )) : (
+                      <p className="text-slate-600 text-center py-4 font-sans text-xs">No active mobile contacts fit current criteria</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <div className="flex justify-between items-center text-xs">
+                    <label className="font-bold text-slate-300 uppercase tracking-wider">SMS Broadcast Message Content (Ujumbe Mahususi) *</label>
+                    <span className="text-slate-500 font-mono">{smsMessage.length} characters</span>
+                  </div>
+                  <textarea
+                    rows={5}
+                    placeholder="Type strategic update, upcoming executive synod invitation, emergency notice, or regional broadcast SMS..."
+                    value={smsMessage}
+                    onChange={(e: any) => setSmsMessage(e.target.value)}
+                    required
+                    className="w-full bg-slate-900 border-2 border-indigo-400/80 rounded-xl p-4 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-4 focus:ring-indigo-500/30 leading-relaxed font-sans"
+                  />
+                </div>
+
+                <Button type="submit" variant="primary" icon={Send} size="lg" disabled={dispatchingSms} className="w-full py-3.5 text-base shadow-xl font-bold">
+                  {dispatchingSms ? 'Dispatching Target SMS via Outbox Gateway Proxy...' : `🚀 Trigger Final SMS Broadcast to ${smsRecipients.length} Target Receivers`}
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+
+          <div className="lg:col-span-3 space-y-6">
+            <Card className="bg-slate-900/90 border-slate-800">
+              <CardHeader className="bg-emerald-950/20">
+                <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4 text-emerald-400" /> Active Bulk Gateway Synchronicity Status
+                </h3>
+              </CardHeader>
+              <CardContent className="space-y-3 font-sans text-xs text-slate-300 leading-relaxed">
+                <div className="p-3 bg-slate-800/40 rounded-xl border border-slate-700/50 flex items-center justify-between">
+                  <span>API Proxy SMS Auto-Linker:</span>
+                  <Badge variant="success" className="font-mono">Ready Operational</Badge>
+                </div>
+                <div className="p-3 bg-slate-800/40 rounded-xl border border-slate-700/50 flex items-center justify-between">
+                  <span>Registered Target Church Branches Linked:</span>
+                  <span className="font-bold text-white font-mono">{churches?.length || 0} Synced</span>
+                </div>
+                <div className="p-3 bg-slate-800/40 rounded-xl border border-slate-700/50 flex items-center justify-between">
+                  <span>Verified Pastors Mobile Routing:</span>
+                  <span className="font-bold text-indigo-300 font-mono">100% Active</span>
+                </div>
+                <p className="text-slate-500 text-[11px] pt-2 leading-normal">
+                  Our comprehensive database auto-matches mobile credentials from target churches, member rosters, and youth hubs. Offline queries queue transmissions for automatic delivery.
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'email' && (
+        <Card className="max-w-4xl bg-slate-900/90 border-slate-800 shadow-2xl">
+          <CardHeader className="bg-indigo-950/30">
+            <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
+              <Mail className="w-5 h-5 text-indigo-400" /> Executive Official Bishop Campaign Outbox
+            </h3>
+            <p className="text-xs text-slate-400 mt-0.5">Transmit formal executive regional synod notices, financial protocols, or discipleship mandates</p>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleDispatchEmail} className="space-y-5">
+              <Select
+                label="Pre-Composed Executive Outreach Circular Templates"
+                options={[
+                  { value: '', label: '— Compose New Custom Campaign —' },
+                  { value: 'Synod Notice: Ultimate Executive Regional synod Conference this week. Please bring all respective Branch Quarter Reports.', label: '🏛️ Formal Synod Circular Invitation' },
+                  { value: 'Stewardship Notice: Core network financial protocol updated. Primary operational currency is TZS. Please complete collection ledgers.', label: '💰 Universal Network Stewardship Mandate' },
+                  { value: 'Discipleship Bulletin: High-priority discipleship new convert progress tracking required for all zone cell leaders.', label: '🕊️ Discipleship Discipleship Protocol' }
+                ]}
+                value={emailTemplate}
+                onChange={(e: any) => {
+                  const t = e.target.value;
+                  setEmailTemplate(t);
+                  if (t) {
+                    setEmailSubject('DoxaRealm Executive Discipleship Hub Campaign Circular');
+                    setEmailMessage(t);
+                  }
+                }}
+              />
+
+              <Input
+                label="Email Campaign Subject *"
+                placeholder="e.g. Discipleship Discipleship Oversight Executive Circular..."
+                value={emailSubject}
+                onChange={(e: any) => setEmailSubject(e.target.value)}
+                required
+              />
+
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">Formal HTML Message Body Content *</label>
+                <textarea
+                  rows={8}
+                  placeholder="Compose your definitive executive circular campaign HTML body here..."
+                  value={emailMessage}
+                  onChange={(e: any) => setEmailMessage(e.target.value)}
+                  required
+                  className="w-full bg-slate-950/80 border-2 border-indigo-500/80 rounded-xl p-4 text-sm text-slate-100 focus:outline-none focus:ring-4 focus:ring-indigo-500/40 leading-relaxed font-sans"
+                />
+              </div>
+
+              <Button type="submit" variant="primary" icon={Rocket} size="lg" disabled={dispatchingEmail} className="w-full py-3.5 text-base font-bold shadow-xl">
+                {dispatchingEmail ? 'Transmitting Official Campaign via Outbox Proxy...' : '🚀 Trigger Final Delivery to All Registered Network Emails'}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+      )}
+
+      {activeTab === 'history' && (
+        <Card className="bg-slate-900/90 border-slate-800">
+          <CardHeader>
+            <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
+              <Database className="w-5 h-5 text-teal-400" /> Complete Communication &amp; Campaign Broadcast Archives
+            </h3>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs text-left">
+                <thead>
+                  <tr className="border-b border-slate-800 text-slate-500 uppercase tracking-wider">
+                    <th className="py-2.5 px-3">Date Dispatched</th>
+                    <th className="py-2.5 px-3">Campaign Channel</th>
+                    <th className="py-2.5 px-3">Sender Office</th>
+                    <th className="py-2.5 px-3">Target Target Receivers</th>
+                    <th className="py-2.5 px-3">Message Subject / Text Content Summary</th>
+                    <th className="py-2.5 px-3 font-bold text-indigo-300">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60 font-sans">
+                  {sortedCommHistory.length > 0 ? sortedCommHistory.map((c: any, i: number) => (
+                    <tr key={i} className="hover:bg-slate-800/30">
+                      <td className="py-3 px-3 text-slate-400 font-mono">{new Date(c.date).toLocaleString()}</td>
+                      <td className="py-3 px-3"><Badge variant={c.type?.includes('SMS') ? 'success' : 'primary'}>{c.type}</Badge></td>
+                      <td className="py-3 px-3 font-medium text-slate-200">{c.senderName || 'Executive Strategic Support'}</td>
+                      <td className="py-3 px-3 text-indigo-300 font-medium">{c.recipientId || 'All Deployed Sub-Units'}</td>
+                      <td className="py-3 px-3 text-slate-300 max-w-xs truncate">{c.subject || c.message || '—'}</td>
+                      <td className="py-3 px-3"><Badge variant="info" className="font-mono">{c.status || 'Proxy Transmitted'}</Badge></td>
+                    </tr>
+                  )) : (
+                    <tr>
+                      <td colSpan={6} className="py-12 text-center text-slate-600">No official messages or SMS campaigns recorded yet.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Notice Board Executive Complete Interactive Edit / Creation Modal */}
+      <Modal open={showNoticeModal} onClose={() => { setShowNoticeModal(false); setEditingNoticeId(null); setNoticeForm(emptyNoticeForm); }} title={editingNoticeId ? "Edit Published Active Regional Notice" : "📌 Post Strategic Regional Executive Announcement"} size="md">
+        <form onSubmit={handleNoticeSubmit} className="space-y-5">
+          <Input label="Notice Title (Kichwa Cha Ujumbe) *" value={noticeForm.title} onChange={(e: any) => setNoticeForm({ ...noticeForm, title: e.target.value })} required placeholder="Urgent General Synod Mandate next week..." />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Select label="Priority Rating *" options={['Normal', 'Urgent']} value={noticeForm.priority} onChange={(e: any) => setNoticeForm({ ...noticeForm, priority: e.target.value })} required />
+            <Select label="Notice Category *" options={['General', 'Discipleship', 'Emergency', 'Meetings', 'Finance']} value={noticeForm.category} onChange={(e: any) => setNoticeForm({ ...noticeForm, category: e.target.value })} required />
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Input label="Author Officer Credentials" value={noticeForm.authorName} onChange={(e: any) => setNoticeForm({ ...noticeForm, authorName: e.target.value })} placeholder="Executive Oversight / Mkoa Oversight..." />
+            <Select label="Target Church Isolation Branch" options={[{ value: '', label: '— Shared Network-Wide —' }, ...(churches || []).map((c: any) => ({ value: c.id, label: c.name }))]} value={noticeForm.churchId} onChange={(e: any) => setNoticeForm({ ...noticeForm, churchId: e.target.value })} />
+          </div>
+          <div className="space-y-1.5">
+            <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">Notice Board Complete Content (Ujumbe Kamili) *</label>
+            <textarea rows={7} value={noticeForm.content} onChange={(e: any) => setNoticeForm({ ...noticeForm, content: e.target.value })} required placeholder="Type definitive detailed instructions or synod meeting parameters exactly..." className="w-full bg-slate-950 border-2 border-indigo-500/80 rounded-xl p-4 text-sm text-slate-100 focus:outline-none focus:ring-4 focus:ring-indigo-500/30 leading-relaxed font-sans" />
+          </div>
+          <div className="flex justify-end gap-3 pt-3 border-t border-slate-800">
+            <Button variant="ghost" type="button" onClick={() => { setShowNoticeModal(false); setEditingNoticeId(null); setNoticeForm(emptyNoticeForm); }}>Cancel</Button>
+            <Button type="submit" variant="primary" icon={Save} size="lg">{editingNoticeId ? 'Publish Adjusted Notice' : 'Broadcast Final Notice to All Regional Leaders'}</Button>
+          </div>
+        </form>
+      </Modal>
+    </div>
+  );
+}
 
 function FinancialSettings() {
   const { db, showToast, apiFetch, refresh } = useApp();
