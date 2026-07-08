@@ -681,42 +681,500 @@ function CommunicationsHub(){ const {db}=useApp(); return <div className="space-
 
 function FinancialSettings() {
   const { db, showToast, apiFetch, refresh } = useApp();
-  const [form, setForm] = useState<any>({ baseCurrency: 'TZS', monthlyCellTarget: 20, titheGoalPercentage: 10, contributionCategories: ['tithe','offering','seed','first_fruit','gospel','youth','other'] });
-  const [newCategory, setNewCategory] = useState('');
-  const [churchContributions, setChurchContributions] = useState<any[]>([]);
+  const { attendanceLogs, churches, zones, cellGroups, stewardshipSettings } = db;
+  const [activeTab, setActiveTab] = useState<'collect' | 'ledger' | 'settings'>('collect');
+
+  // Form & Category settings
+  const [selectedCategory, setSelectedCategory] = useState<string>('offering');
+  const [editingLogId, setEditingLogId] = useState<number | null>(null);
+  
+  const emptyCollectForm = {
+    date: new Date().toISOString().split('T')[0],
+    churchId: '',
+    zoneId: '',
+    cellGroupId: '',
+    attendance: '0',
+    tithe: '',
+    offering: '',
+    seed: '',
+    firstFruit: '',
+    gospel: '',
+    sundaySchool: '',
+    youth: '',
+    other: '',
+    currency: 'TZS',
+    notes: ''
+  };
+  
+  const [collectForm, setCollectForm] = useState<any>(emptyCollectForm);
+  const [settingsForm, setSettingsForm] = useState<any>({ baseCurrency: 'TZS', monthlyCellTarget: 20, titheGoalPercentage: 10, contributionCategories: ['tithe','offering','seed','first_fruit','gospel','sunday_school','youth','other'] });
+  const [newCat, setNewCat] = useState('');
+
   useEffect(() => {
-    if (db.stewardshipSettings) setForm(db.stewardshipSettings);
-    const contrib = db.churches.map((ch: any) => ({ church: ch.name, tithe: Math.floor(Math.random()*1200000), offering: Math.floor(Math.random()*800000), seed: Math.floor(Math.random()*450000), firstFruit: Math.floor(Math.random()*300000), gospel: Math.floor(Math.random()*250000), youth: Math.floor(Math.random()*180000), other: Math.floor(Math.random()*150000), total: 0, currency: 'TZS' }));
-    setChurchContributions(contrib.map((c: any) => ({ ...c, total: Object.values(c).reduce((a: number, b: any) => a + (typeof b === 'number' ? b : 0), 0) })));
-  }, [db.stewardshipSettings, db.churches]);
-  const handleSaveSettings = async (e: any) => { e.preventDefault(); try { await apiFetch('/stewardship-settings', { method: 'POST', body: JSON.stringify(form) }); refresh(); showToast('Stewardship settings updated','success'); } catch (err: any) { showToast(err.message,'error'); } };
-  const currencies = ['TZS','USD','KES','UGX','EUR','GBP','ZAR','NGN','RWF','BIF','MWK'];
-  const categories = form.contributionCategories || ['tithe','offering','seed','first_fruit','gospel','youth','other'];
-  const totalTithe = churchContributions.reduce((sum:any,c:any)=>sum+(c.tithe||0),0);
-  const totalOffering = churchContributions.reduce((sum:any,c:any)=>sum+(c.offering||0),0);
-  const totalYouth = churchContributions.reduce((sum:any,c:any)=>sum+(c.youth||0),0);
+    if (stewardshipSettings) {
+      setSettingsForm({
+        baseCurrency: stewardshipSettings.baseCurrency || 'TZS',
+        monthlyCellTarget: stewardshipSettings.monthlyCellTarget || 20,
+        titheGoalPercentage: stewardshipSettings.titheGoalPercentage || 10,
+        contributionCategories: stewardshipSettings.contributionCategories || ['tithe','offering','seed','first_fruit','gospel','sunday_school','youth','other']
+      });
+      setCollectForm((prev:any) => ({ ...prev, currency: stewardshipSettings.baseCurrency || 'TZS' }));
+    }
+  }, [stewardshipSettings]);
+
+  // Categories definitions for interactive selection
+  const categoriesList = [
+    { id: 'tithe', label: 'Tithe', swahili: 'Zaka 10%', icon: Award, color: 'text-emerald-400', bg: 'bg-emerald-900/20', border: 'border-emerald-700/50' },
+    { id: 'offering', label: 'Offering', swahili: 'Sadaka ya Kawaida', icon: Banknote, color: 'text-amber-400', bg: 'bg-amber-900/20', border: 'border-amber-700/50' },
+    { id: 'seed', label: 'Seed', swahili: 'Sadaka ya Mbegu', icon: Rocket, color: 'text-cyan-400', bg: 'bg-cyan-900/20', border: 'border-cyan-700/50' },
+    { id: 'first_fruit', label: 'First Fruit', swahili: 'Malimbuko', icon: Award, color: 'text-rose-400', bg: 'bg-rose-900/20', border: 'border-rose-700/50' },
+    { id: 'gospel', label: 'Gospel Fund', swahili: 'Mfuko wa Injili', icon: HardDrive, color: 'text-indigo-400', bg: 'bg-indigo-900/20', border: 'border-indigo-700/50' },
+    { id: 'sunday_school', label: 'Sunday School', swahili: 'Shule ya Jumapili', icon: Users, color: 'text-teal-400', bg: 'bg-teal-900/20', border: 'border-teal-700/50' },
+    { id: 'youth', label: 'Youth Fund', swahili: 'Mfuko wa Vijana', icon: Zap, color: 'text-violet-400', bg: 'bg-violet-900/20', border: 'border-violet-700/50' },
+    { id: 'other', label: 'Others', swahili: 'Michango Mengineyo', icon: Check, color: 'text-slate-400', bg: 'bg-slate-800', border: 'border-slate-700/50' },
+  ];
+
+  // Cascading geographic selects
+  const filteredZones = collectForm.churchId ? (zones || []).filter((z: any) => z.churchId === parseInt(collectForm.churchId)) : (zones || []);
+  const filteredCells = collectForm.zoneId ? (cellGroups || []).filter((c: any) => c.zoneId === parseInt(collectForm.zoneId)) : collectForm.churchId ? (cellGroups || []).filter((c: any) => c.churchId === parseInt(collectForm.churchId)) : (cellGroups || []);
+
+  const handleCategoryClick = (catId: string) => {
+    setSelectedCategory(catId);
+    showToast(`Opened Interactive Form for: ${categoriesList.find(c => c.id === catId)?.label} (${categoriesList.find(c => c.id === catId)?.swahili})`, 'info');
+  };
+
+  const handleCollectSubmit = async (e: any) => {
+    e.preventDefault();
+    if (!collectForm.churchId) {
+      showToast('Please select the respective Church Branch', 'error');
+      return;
+    }
+    
+    const payload = {
+      ...collectForm,
+      churchId: collectForm.churchId ? parseInt(collectForm.churchId) : null,
+      zoneId: collectForm.zoneId ? parseInt(collectForm.zoneId) : null,
+      cellGroupId: collectForm.cellGroupId ? parseInt(collectForm.cellGroupId) : null,
+      attendance: parseInt(collectForm.attendance) || 0,
+      tithe: parseFloat(collectForm.tithe) || 0,
+      offering: parseFloat(collectForm.offering) || 0,
+      seed: parseFloat(collectForm.seed) || 0,
+      firstFruit: parseFloat(collectForm.firstFruit) || 0,
+      gospel: parseFloat(collectForm.gospel) || 0,
+      sundaySchool: parseFloat(collectForm.sundaySchool) || 0,
+      youth: parseFloat(collectForm.youth) || 0,
+      other: parseFloat(collectForm.other) || 0,
+      timestamp: new Date().toISOString()
+    };
+
+    try {
+      if (editingLogId) {
+        await apiFetch(`/attendance-logs/${editingLogId}`, { method: 'PUT', body: JSON.stringify(payload) });
+        await apiFetch('/audit-logs', { method: 'POST', body: JSON.stringify({ action: 'collection_updated', details: `Updated collection ID ${editingLogId}`, timestamp: new Date().toISOString() }) });
+        showToast('Financial Collection Updated Successfully', 'success');
+      } else {
+        await apiFetch('/attendance-logs', { method: 'POST', body: JSON.stringify(payload) });
+        await apiFetch('/audit-logs', { method: 'POST', body: JSON.stringify({ action: 'collection_logged', details: `Logged collections for branch ID ${payload.churchId}`, timestamp: new Date().toISOString() }) });
+        showToast('Financial Collections Recorded Successfully to Branch, Zone and Cell', 'success');
+      }
+      setCollectForm(emptyCollectForm);
+      setEditingLogId(null);
+      refresh();
+    } catch (err: any) {
+      showToast(err.message, 'error');
+    }
+  };
+
+  const startEditLog = (log: any) => {
+    const toD = (v: any) => v ? new Date(v).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
+    setCollectForm({
+      date: toD(log.date),
+      churchId: log.churchId ? String(log.churchId) : '',
+      zoneId: log.zoneId ? String(log.zoneId) : '',
+      cellGroupId: log.cellGroupId ? String(log.cellGroupId) : '',
+      attendance: String(log.attendance || 0),
+      tithe: log.tithe ? String(log.tithe) : '',
+      offering: log.offering ? String(log.offering) : '',
+      seed: log.seed ? String(log.seed) : '',
+      firstFruit: log.firstFruit ? String(log.firstFruit) : '',
+      gospel: log.gospel ? String(log.gospel) : '',
+      sundaySchool: log.sundaySchool ? String(log.sundaySchool) : '',
+      youth: log.youth ? String(log.youth) : '',
+      other: log.other ? String(log.other) : '',
+      currency: log.currency || settingsForm.baseCurrency,
+      notes: log.notes || ''
+    });
+    setEditingLogId(log.id);
+    setActiveTab('collect');
+    showToast('Editing financial collection record', 'info');
+  };
+
+  const handleSaveSettings = async (e: any) => {
+    e.preventDefault();
+    try {
+      await apiFetch('/stewardship-settings', { method: 'POST', body: JSON.stringify(settingsForm) });
+      refresh();
+      showToast('Global Stewardship Configuration Saved', 'success');
+    } catch (err: any) { showToast(err.message, 'error'); }
+  };
+
+  // Sums calculations from active database records
+  const allLogs = (attendanceLogs || []).sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  const grandTithe = allLogs.reduce((s: number, l: any) => s + (l.tithe || 0), 0);
+  const grandOffering = allLogs.reduce((s: number, l: any) => s + (l.offering || 0), 0);
+  const grandSeed = allLogs.reduce((s: number, l: any) => s + (l.seed || 0), 0);
+  const grandFirstFruit = allLogs.reduce((s: number, l: any) => s + (l.firstFruit || 0), 0);
+  const grandGospel = allLogs.reduce((s: number, l: any) => s + (l.gospel || 0), 0);
+  const grandSundaySchool = allLogs.reduce((s: number, l: any) => s + (l.sundaySchool || 0), 0);
+  const grandYouth = allLogs.reduce((s: number, l: any) => s + (l.youth || 0), 0);
+  const grandOther = allLogs.reduce((s: number, l: any) => s + (l.other || 0), 0);
+  const grandTotalAll = grandTithe + grandOffering + grandSeed + grandFirstFruit + grandGospel + grandSundaySchool + grandYouth + grandOther;
+
+  // Per church aggregation
+  const churchGivingTotals = (churches || []).map((ch: any) => {
+    const chL = allLogs.filter((l: any) => l.churchId === ch.id);
+    const tot = chL.reduce((s: number, l: any) => s + ((l.tithe||0)+(l.offering||0)+(l.seed||0)+(l.firstFruit||0)+(l.gospel||0)+(l.sundaySchool||0)+(l.youth||0)+(l.other||0)), 0);
+    return { name: ch.name, location: ch.location || ch.city, count: chL.length, total: tot };
+  });
+
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center"><div><h1 className="text-2xl font-bold text-slate-100 flex items-center gap-3"><Wallet className="w-6 h-6 text-indigo-400" /> Stewardship &amp; Giving</h1><p className="text-sm text-slate-500 mt-1">Multi-currency support (TZS primary) • Track tithe, seed, first fruit, gospel, youth &amp; more per church</p></div><Badge variant="success" className="text-sm">TZS Enabled</Badge></div>
-      <div className="grid grid-cols-1 lg:grid-cols-7 gap-6">
-        <Card className="lg:col-span-3"><CardHeader><h3 className="text-sm font-semibold flex items-center gap-2"><Settings className="w-4 h-4" /> Global Settings</h3></CardHeader><CardContent><form onSubmit={handleSaveSettings} className="space-y-6">
-          <Select label="Base Currency (Tanzania default)" options={currencies} value={form.baseCurrency} onChange={(e:any)=>setForm({...form,baseCurrency:e.target.value})} />
-          <Input label="Monthly Cell Target (TZS)" type="number" value={form.monthlyCellTarget} onChange={(e:any)=>setForm({...form,monthlyCellTarget:parseInt(e.target.value)||20})} />
-          <Input label="Tithe Goal (%)" type="number" step="0.1" value={form.titheGoalPercentage} onChange={(e:any)=>setForm({...form,titheGoalPercentage:parseFloat(e.target.value)||10})} />
-          <div><label className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-2">Contribution Categories</label><div className="flex flex-wrap gap-2 mb-4">{categories.map((cat:string,i:number)=><Badge key={i} variant="info" className="capitalize">{cat.replace('_',' ')}</Badge>)}</div><div className="flex gap-2"><Input placeholder="New category (e.g. building)" value={newCategory} onChange={(e:any)=>setNewCategory(e.target.value)} /><Button type="button" variant="secondary" onClick={()=>{ if(newCategory && !categories.includes(newCategory.toLowerCase())){ setForm({...form, contributionCategories: [...categories, newCategory.toLowerCase()]}); setNewCategory(''); } }}>Add</Button></div></div>
-          <Button type="submit" className="w-full" icon={Save}>Save Stewardship Settings</Button>
-        </form></CardContent></Card>
-        <Card className="lg:col-span-4"><CardHeader><h3 className="text-sm font-semibold flex items-center gap-2"><BarChart3 className="w-4 h-4" /> Church Giving Overview (TZS)</h3></CardHeader><CardContent>
-          <div className="grid grid-cols-3 gap-4 mb-6">
-            <div className="bg-slate-800/40 p-4 rounded-2xl border border-slate-700"><div className="text-xs text-slate-500">TOTAL TITHE</div><div className="text-3xl font-bold text-emerald-400 mt-1">{totalTithe.toLocaleString()}</div><div className="text-xs text-emerald-500">TZS</div></div>
-            <div className="bg-slate-800/40 p-4 rounded-2xl border border-slate-700"><div className="text-xs text-slate-500">TOTAL OFFERING</div><div className="text-3xl font-bold text-amber-400 mt-1">{totalOffering.toLocaleString()}</div><div className="text-xs text-amber-500">TZS</div></div>
-            <div className="bg-slate-800/40 p-4 rounded-2xl border border-slate-700"><div className="text-xs text-slate-500">YOUTH FUND</div><div className="text-3xl font-bold text-violet-400 mt-1">{totalYouth.toLocaleString()}</div><div className="text-xs text-violet-500">TZS</div></div>
-          </div>
-          <div className="max-h-[420px] overflow-y-auto pr-2">{churchContributions.map((ch:any,i:number)=>(
-            <div key={i} className="flex justify-between items-center py-3 border-b border-slate-800/60 last:border-0 hover:bg-slate-800/30 px-2 rounded-lg"><div><div className="font-medium">{ch.church}</div><div className="text-xs text-slate-500">All categories recorded in TZS</div></div><div className="text-right"><div className="font-mono text-emerald-300 text-sm">{ch.total.toLocaleString()} TZS</div><div className="flex gap-3 text-[10px] text-slate-500 mt-1"><span>T:{ch.tithe}</span><span>O:{ch.offering}</span><span>Y:{ch.youth}</span></div></div></div>
-          ))}</div>
-        </CardContent></Card>
+      {/* Top Main Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-100 flex items-center gap-3">
+            <Wallet className="w-6 h-6 text-indigo-400" /> Stewardship &amp; Interactive Collections Hub
+          </h1>
+          <p className="text-sm text-slate-500 mt-1">
+            Click any offering category to open branch inputs • Fill exact collections linked to exact Churches, Zones, and Cell Groups
+          </p>
+        </div>
+
+        {/* Action switch tabs */}
+        <div className="flex bg-slate-800/90 rounded-xl border border-slate-700/80 p-1 font-medium text-xs">
+          <button
+            onClick={() => setActiveTab('collect')}
+            className={`px-4 py-2 rounded-lg transition-all ${activeTab === 'collect' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+          >
+            💰 Click &amp; Record Collections
+          </button>
+          <button
+            onClick={() => setActiveTab('ledger')}
+            className={`px-4 py-2 rounded-lg transition-all ${activeTab === 'ledger' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+          >
+            📊 Network Ledgers &amp; Archive
+          </button>
+          <button
+            onClick={() => setActiveTab('settings')}
+            className={`px-4 py-2 rounded-lg transition-all ${activeTab === 'settings' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+          >
+            ⚙️ Configuration
+          </button>
+        </div>
       </div>
+
+      {activeTab === 'collect' && (
+        <div className="space-y-6">
+          {/* Top Categories interactive picker bar */}
+          <div>
+            <label className="block text-xs font-semibold text-indigo-300 uppercase tracking-wider mb-3 flex items-center gap-2">
+              <Award className="w-4 h-4" /> 1. Tapping Any Offering Category Highlights &amp; Opens Its Respective Input Mode
+            </label>
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
+              {categoriesList.map((cat) => {
+                const isSelected = selectedCategory === cat.id;
+                return (
+                  <button
+                    key={cat.id}
+                    onClick={() => handleCategoryClick(cat.id)}
+                    className={`p-3.5 rounded-2xl border text-left transition-all duration-200 cursor-pointer flex flex-col justify-between h-28 ${isSelected ? 'ring-2 ring-indigo-500 bg-indigo-950/40 border-indigo-500 scale-[1.03] shadow-lg shadow-indigo-950/50' : `${cat.bg} ${cat.border} opacity-80 hover:opacity-100`}`}
+                  >
+                    <div className="flex items-center justify-between w-full">
+                      <cat.icon className={`w-5 h-5 ${cat.color}`} />
+                      {isSelected && <Badge variant="success" className="text-[9px]">Active</Badge>}
+                    </div>
+                    <div>
+                      <p className="font-bold text-slate-100 text-sm tracking-tight truncate">{cat.label}</p>
+                      <p className="text-[10px] text-slate-400 truncate mt-0.5">{cat.swahili}</p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Highly polished highly detailed collection form */}
+          <Card className="border-indigo-900/50 bg-slate-900/90 shadow-2xl">
+            <CardHeader className="flex flex-wrap items-center justify-between gap-2 bg-indigo-950/20">
+              <div>
+                <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
+                  <Banknote className="w-5 h-5 text-emerald-400" /> 2. Fill Respective Church Branch, Zone, Cell and Collection Sums
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Currently filling records specifically focused on <strong className="text-indigo-300 capitalize">{categoriesList.find(c => c.id === selectedCategory)?.label} ({categoriesList.find(c => c.id === selectedCategory)?.swahili})</strong> (or complete all relevant categories below).
+                </p>
+              </div>
+              <Badge variant="primary" className="text-xs font-mono py-1 px-3">Currency: {collectForm.currency}</Badge>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleCollectSubmit} className="space-y-6">
+                {/* 1. Respective Geography & Date */}
+                <div className="p-4 bg-slate-800/40 rounded-2xl border border-slate-700/60 space-y-4">
+                  <div className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                    <Building2 className="w-4 h-4 text-amber-400" /> Target Geography &amp; Date
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <Select
+                      label="Target Church Branch *"
+                      options={[{ value: '', label: '— Select Respective Church —' }, ...(churches || []).map((c: any) => ({ value: c.id, label: c.name }))]}
+                      value={collectForm.churchId}
+                      onChange={(e: any) => setCollectForm({ ...collectForm, churchId: e.target.value, zoneId: '', cellGroupId: '' })}
+                      required
+                    />
+                    <Select
+                      label="Respective Zone Branch"
+                      options={[{ value: '', label: '— All Zones —' }, ...filteredZones.map((z: any) => ({ value: z.id, label: z.name }))]}
+                      value={collectForm.zoneId}
+                      onChange={(e: any) => setCollectForm({ ...collectForm, zoneId: e.target.value, cellGroupId: '' })}
+                    />
+                    <Select
+                      label="Respective Cell Group"
+                      options={[{ value: '', label: '— All Cells —' }, ...filteredCells.map((c: any) => ({ value: c.id, label: c.name }))]}
+                      value={collectForm.cellGroupId}
+                      onChange={(e: any) => setCollectForm({ ...collectForm, cellGroupId: e.target.value })}
+                    />
+                    <Input
+                      label="Collection Date *"
+                      type="date"
+                      value={collectForm.date}
+                      onChange={(e: any) => setCollectForm({ ...collectForm, date: e.target.value })}
+                      required
+                    />
+                  </div>
+                </div>
+
+                {/* 2. Primary auto-highlighted clicked category input */}
+                <div className="p-5 bg-indigo-950/30 rounded-2xl border-2 border-indigo-500/80 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-bold text-indigo-200 tracking-wide uppercase flex items-center gap-2">
+                      <Award className="w-4 h-4 text-emerald-400 animate-pulse" /> Auto-Focused Target Input: {categoriesList.find(c => c.id === selectedCategory)?.label} ({categoriesList.find(c => c.id === selectedCategory)?.swahili})
+                    </span>
+                    <span className="text-xs text-indigo-400">All amounts entered in {collectForm.currency}</span>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      step="0.01"
+                      placeholder={`Enter total ${categoriesList.find(c => c.id === selectedCategory)?.label} sum collected...`}
+                      value={
+                        selectedCategory === 'tithe' ? collectForm.tithe :
+                        selectedCategory === 'offering' ? collectForm.offering :
+                        selectedCategory === 'seed' ? collectForm.seed :
+                        selectedCategory === 'first_fruit' ? collectForm.firstFruit :
+                        selectedCategory === 'gospel' ? collectForm.gospel :
+                        selectedCategory === 'sunday_school' ? collectForm.sundaySchool :
+                        selectedCategory === 'youth' ? collectForm.youth : collectForm.other
+                      }
+                      onChange={(e: any) => {
+                        const val = e.target.value;
+                        if (selectedCategory === 'tithe') setCollectForm({ ...collectForm, tithe: val });
+                        else if (selectedCategory === 'offering') setCollectForm({ ...collectForm, offering: val });
+                        else if (selectedCategory === 'seed') setCollectForm({ ...collectForm, seed: val });
+                        else if (selectedCategory === 'first_fruit') setCollectForm({ ...collectForm, firstFruit: val });
+                        else if (selectedCategory === 'gospel') setCollectForm({ ...collectForm, gospel: val });
+                        else if (selectedCategory === 'sunday_school') setCollectForm({ ...collectForm, sundaySchool: val });
+                        else if (selectedCategory === 'youth') setCollectForm({ ...collectForm, youth: val });
+                        else setCollectForm({ ...collectForm, other: val });
+                      }}
+                      className="w-full bg-slate-900 border-2 border-indigo-400 rounded-xl px-4 py-3 text-lg font-bold font-mono text-emerald-400 placeholder-slate-600 focus:outline-none focus:ring-4 focus:ring-indigo-500/40"
+                    />
+                  </div>
+                </div>
+
+                {/* 3. Simultaneous Input for All Other Financial Categories */}
+                <div className="p-4 bg-slate-800/30 rounded-2xl border border-slate-700/60 space-y-4">
+                  <div className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
+                    <span>Or Fill All Other Relevant Collection Collections Simultaneously</span>
+                    <span className="text-[10px] text-slate-500 lowercase">Optional inputs</span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+                    <Input label="Tithe (Zaka)" type="number" step="0.01" value={collectForm.tithe} onChange={(e:any) => setCollectForm({...collectForm, tithe: e.target.value})} />
+                    <Input label="Offering (Sadaka)" type="number" step="0.01" value={collectForm.offering} onChange={(e:any) => setCollectForm({...collectForm, offering: e.target.value})} />
+                    <Input label="Seed (Mbegu)" type="number" step="0.01" value={collectForm.seed} onChange={(e:any) => setCollectForm({...collectForm, seed: e.target.value})} />
+                    <Input label="First Fruit" type="number" step="0.01" value={collectForm.firstFruit} onChange={(e:any) => setCollectForm({...collectForm, firstFruit: e.target.value})} />
+                    <Input label="Gospel (Injili)" type="number" step="0.01" value={collectForm.gospel} onChange={(e:any) => setCollectForm({...collectForm, gospel: e.target.value})} />
+                    <Input label="Sunday School" type="number" step="0.01" value={collectForm.sundaySchool} onChange={(e:any) => setCollectForm({...collectForm, sundaySchool: e.target.value})} />
+                    <Input label="Youth Fund" type="number" step="0.01" value={collectForm.youth} onChange={(e:any) => setCollectForm({...collectForm, youth: e.target.value})} />
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                    <Input label="Other Contributions (Mengineyo)" type="number" step="0.01" value={collectForm.other} onChange={(e:any) => setCollectForm({...collectForm, other: e.target.value})} />
+                    <Input label="Receipt / Collection Notes" value={collectForm.notes} onChange={(e:any) => setCollectForm({...collectForm, notes: e.target.value})} placeholder="Receipt No. or collector credentials..." />
+                  </div>
+                </div>
+
+                {/* Submit Actions */}
+                <div className="flex items-center justify-end gap-4 pt-2">
+                  {editingLogId && (
+                    <Button variant="ghost" type="button" onClick={() => { setEditingLogId(null); setCollectForm(emptyCollectForm); }}>
+                      Cancel Edit
+                    </Button>
+                  )}
+                  <Button type="submit" variant="primary" icon={Save} size="lg" className="w-full sm:w-auto px-8">
+                    {editingLogId ? 'Update financial Collection Record' : 'Save Collections to Target Church Branch'}
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Network financial Ledgers and real sums */}
+      {activeTab === 'ledger' && (
+        <div className="space-y-6">
+          {/* Top Aggregated stats */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
+            <div className="bg-emerald-900/30 border border-emerald-700/50 p-3 rounded-xl text-center"><div className="text-sm font-bold font-mono text-emerald-400">{grandTithe.toLocaleString()}</div><div className="text-[10px] text-slate-400 uppercase mt-0.5">Grand Tithe</div></div>
+            <div className="bg-amber-900/30 border border-amber-700/50 p-3 rounded-xl text-center"><div className="text-sm font-bold font-mono text-amber-400">{grandOffering.toLocaleString()}</div><div className="text-[10px] text-slate-400 uppercase mt-0.5">Offering</div></div>
+            <div className="bg-cyan-900/30 border border-cyan-700/50 p-3 rounded-xl text-center"><div className="text-sm font-bold font-mono text-cyan-400">{grandSeed.toLocaleString()}</div><div className="text-[10px] text-slate-400 uppercase mt-0.5">Seed Fund</div></div>
+            <div className="bg-rose-900/30 border border-rose-700/50 p-3 rounded-xl text-center"><div className="text-sm font-bold font-mono text-rose-400">{grandFirstFruit.toLocaleString()}</div><div className="text-[10px] text-slate-400 uppercase mt-0.5">1st Fruit</div></div>
+            <div className="bg-indigo-900/30 border border-indigo-700/50 p-3 rounded-xl text-center"><div className="text-sm font-bold font-mono text-indigo-400">{grandGospel.toLocaleString()}</div><div className="text-[10px] text-slate-400 uppercase mt-0.5">Gospel Hub</div></div>
+            <div className="bg-teal-900/30 border border-teal-700/50 p-3 rounded-xl text-center"><div className="text-sm font-bold font-mono text-teal-400">{grandSundaySchool.toLocaleString()}</div><div className="text-[10px] text-slate-400 uppercase mt-0.5">Sun. School</div></div>
+            <div className="bg-violet-900/30 border border-violet-700/50 p-3 rounded-xl text-center"><div className="text-sm font-bold font-mono text-violet-400">{grandYouth.toLocaleString()}</div><div className="text-[10px] text-slate-400 uppercase mt-0.5">Youth Fund</div></div>
+            <div className="bg-slate-800 border border-slate-700/50 p-3 rounded-xl text-center font-bold text-white"><div className="text-sm font-mono">{grandTotalAll.toLocaleString()}</div><div className="text-[10px] text-emerald-400 uppercase mt-0.5">All Income</div></div>
+          </div>
+
+          {/* Real Live Per-Church Financial Collections Progress Card */}
+          <Card>
+            <CardHeader>
+              <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
+                <Building2 className="w-5 h-5 text-indigo-400" /> Active Discipleship &amp; Collection Records Grouped By Target Church
+              </h3>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {churchGivingTotals.map((ch: any, idx: number) => (
+                  <div key={idx} className="p-4 bg-slate-800/30 rounded-2xl border border-slate-700/60 hover:border-slate-600 transition">
+                    <div className="flex items-center justify-between mb-2">
+                      <strong className="text-base font-bold text-slate-100">{ch.name}</strong>
+                      <Badge variant="success" className="font-mono">{ch.count} entries</Badge>
+                    </div>
+                    <p className="text-xs text-slate-400 mb-3">{ch.location || 'Central Area'}</p>
+                    <div className="bg-slate-900 p-3 rounded-xl flex items-center justify-between font-mono text-sm">
+                      <span className="text-slate-500 text-xs">SUM GIVING:</span>
+                      <span className="font-bold text-emerald-400 tracking-tight">{ch.total.toLocaleString()} TZS</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Full collection records archive table with Edit Standard */}
+          <Card>
+            <CardHeader>
+              <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
+                <Database className="w-5 h-5 text-emerald-400" /> Master Actual Discipleship &amp; Financial Collections Ledger
+              </h3>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs text-left">
+                  <thead>
+                    <tr className="border-b border-slate-800 text-slate-500 uppercase tracking-wider">
+                      <th className="py-2.5 px-3">Date</th>
+                      <th className="py-2.5 px-3">Church Branch</th>
+                      <th className="py-2.5 px-3">Zone / Cell</th>
+                      <th className="py-2.5 px-3 text-right">Tithe</th>
+                      <th className="py-2.5 px-3 text-right">Offering</th>
+                      <th className="py-2.5 px-3 text-right">Seed</th>
+                      <th className="py-2.5 px-3 text-right">1st Fruit</th>
+                      <th className="py-2.5 px-3 text-right">Gospel</th>
+                      <th className="py-2.5 px-3 text-right">Sun. School</th>
+                      <th className="py-2.5 px-3 text-right">Youth</th>
+                      <th className="py-2.5 px-3 text-right">Other</th>
+                      <th className="py-2.5 px-3 text-right font-bold text-indigo-300">Grand Sum</th>
+                      <th className="py-2.5 px-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60 font-mono">
+                    {allLogs.length > 0 ? allLogs.map((l: any, i: number) => {
+                      const ch = (churches || []).find((c: any) => c.id === l.churchId);
+                      const z = (zones || []).find((zone: any) => zone.id === l.zoneId);
+                      const cl = (cellGroups || []).find((cell: any) => cell.id === l.cellGroupId);
+                      const tot = (l.tithe||0)+(l.offering||0)+(l.seed||0)+(l.firstFruit||0)+(l.gospel||0)+(l.sundaySchool||0)+(l.youth||0)+(l.other||0);
+                      
+                      return (
+                        <tr key={i} className="hover:bg-slate-800/30">
+                          <td className="py-3 px-3 text-slate-300">{new Date(l.date).toLocaleDateString()}</td>
+                          <td className="py-3 px-3 font-bold font-sans text-slate-100">{ch?.name || '—'}</td>
+                          <td className="py-3 px-3 font-sans text-slate-400">
+                            <div>{z?.name || '—'}</div>
+                            <div className="text-[10px] text-slate-500">{cl?.name || ''}</div>
+                          </td>
+                          <td className="py-3 px-3 text-right text-emerald-400">{l.tithe?.toLocaleString() || '-'}</td>
+                          <td className="py-3 px-3 text-right text-amber-400">{l.offering?.toLocaleString() || '-'}</td>
+                          <td className="py-3 px-3 text-right text-cyan-400">{l.seed?.toLocaleString() || '-'}</td>
+                          <td className="py-3 px-3 text-right text-rose-400">{l.firstFruit?.toLocaleString() || '-'}</td>
+                          <td className="py-3 px-3 text-right text-indigo-400">{l.gospel?.toLocaleString() || '-'}</td>
+                          <td className="py-3 px-3 text-right text-teal-400">{l.sundaySchool?.toLocaleString() || '-'}</td>
+                          <td className="py-3 px-3 text-right text-violet-400">{l.youth?.toLocaleString() || '-'}</td>
+                          <td className="py-3 px-3 text-right text-slate-400">{l.other?.toLocaleString() || '-'}</td>
+                          <td className="py-3 px-3 text-right font-bold text-white bg-slate-900/60 rounded">{tot.toLocaleString()} {l.currency || 'TZS'}</td>
+                          <td className="py-3 px-3 text-right font-sans">
+                            <Button variant="ghost" size="xs" icon={Edit3} onClick={() => startEditLog(l)}>Edit</Button>
+                          </td>
+                        </tr>
+                      );
+                    }) : (
+                      <tr>
+                        <td colSpan={13} className="py-12 text-center font-sans text-slate-600">
+                          No financial collection logs recorded yet. Switch to "Click &amp; Record Collections" to fill collections.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Stewardship configuration */}
+      {activeTab === 'settings' && (
+        <Card>
+          <CardHeader>
+            <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
+              <Settings className="w-5 h-5 text-indigo-400" /> Global Network Financial Stewardship Configuration
+            </h3>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleSaveSettings} className="space-y-6 max-w-2xl">
+              <Select
+                label="Base Currency (Tanzania TZS Default)"
+                options={['TZS','USD','KES','UGX','EUR','GBP','ZAR','NGN','RWF','BIF','MWK']}
+                value={settingsForm.baseCurrency}
+                onChange={(e: any) => setSettingsForm({ ...settingsForm, baseCurrency: e.target.value })}
+              />
+              <Input
+                label="Monthly Baseline Cell Target (TZS)"
+                type="number"
+                value={settingsForm.monthlyCellTarget}
+                onChange={(e: any) => setSettingsForm({ ...settingsForm, monthlyCellTarget: parseInt(e.target.value) || 20 })}
+              />
+              <Input
+                label="Baseline Tithe Network Goal (%)"
+                type="number"
+                step="0.1"
+                value={settingsForm.titheGoalPercentage}
+                onChange={(e: any) => setSettingsForm({ ...settingsForm, titheGoalPercentage: parseFloat(e.target.value) || 10 })}
+              />
+              <Button type="submit" variant="primary" icon={Save} size="lg">Save Configuration</Button>
+            </form>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

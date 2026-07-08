@@ -118,6 +118,9 @@ export const cellGroups = pgTable("cell_groups", {
 export const attendanceLogs = pgTable("attendance_logs", {
   id: serial("id").primaryKey(),
   date: timestamp("date"),
+  churchId: integer("church_id"),
+  zoneId: integer("zone_id"),
+  cellGroupId: integer("cell_group_id"),
   attendance: integer("attendance").default(0),
   visitorCount: integer("visitor_count").default(0),
   // Financial breakdown
@@ -126,6 +129,7 @@ export const attendanceLogs = pgTable("attendance_logs", {
   seed: real("seed").default(0),
   firstFruit: real("first_fruit").default(0),
   gospel: real("gospel").default(0),
+  sundaySchool: real("sunday_school").default(0),
   youth: real("youth").default(0),
   other: real("other").default(0),
   currency: text("currency").default("TZS"),
