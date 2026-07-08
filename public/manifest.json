@@ -1,0 +1,24 @@
+{
+  "name": "DoxaRealm Church Management System",
+  "short_name": "DoxaRealm",
+  "description": "Offline-resilient Church Management System with TZS stewardship, Youth 13-45, Baptism tracking & Quarterly Reports",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#6366f1",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
