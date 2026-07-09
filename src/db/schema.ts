@@ -201,5 +201,9 @@ export const documents = pgTable("documents", {
   size: integer("size"),
   type: text("type"),
   url: text("url"),
+  fileData: text("file_data"),
+  description: text("description"),
+  category: text("category").default("General"),
+  uploadedBy: text("uploaded_by"),
   uploadedAt: timestamp("uploaded_at").defaultNow(),
 });

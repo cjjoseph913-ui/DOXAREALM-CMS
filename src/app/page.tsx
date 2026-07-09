@@ -13,7 +13,8 @@ import {
   UserCheck, Zap, Clock, Trash2, Edit3, Settings, BarChart3, Download, Printer, Award, Filter, Info,
   Share2, ExternalLink, Copy, Smartphone, Server, HardDrive, Check, Rocket,
   Megaphone, Pin, Radio, AlertTriangle,
-  CheckSquare, ListTodo, CalendarDays
+  CheckSquare, ListTodo, CalendarDays,
+  Upload, FolderOpen, Image as ImageIcon, Table, Monitor
 } from 'lucide-react';
 
 const API_BASE = '/api';
@@ -2151,7 +2152,211 @@ function FinancialSettings() {
   );
 }
 
-function DocumentRepository(){ const {db}=useApp(); return <div className="space-y-6"><h1 className="text-2xl font-bold flex items-center gap-2"><Folder className="w-6 h-6 text-indigo-400"/>Documents</h1><Card><CardContent>{db.documents.length===0 ? 'No documents' : db.documents.map((d:any,i:number)=><div key={i}>{d.name}</div>)}</CardContent></Card></div>; }
+function DocumentRepository() {
+  const { db, showToast, apiFetch, refresh } = useApp();
+  const { documents } = db;
+  const [uploading, setUploading] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [form, setForm] = useState({ name: '', description: '', category: 'General', uploadedBy: '' });
+  const [filter, setFilter] = useState('All');
+
+  const categories = ['General', 'Sermons', 'Reports', 'Financial', 'Legal', 'Meeting Minutes', 'Training', 'Certificates', 'Photos', 'Other'];
+
+  const handleUpload = async (e: any) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) {
+      showToast('File too large. Maximum 10MB allowed.', 'error');
+      return;
+    }
+    try {
+      setUploading(true);
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('description', form.description);
+      formData.append('category', form.category);
+      formData.append('uploadedBy', form.uploadedBy);
+      const res = await fetch('/api/upload', { method: 'POST', body: formData });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Upload failed' }));
+        throw new Error(err.error);
+      }
+      await apiFetch('/audit-logs', { method: 'POST', body: JSON.stringify({ action: 'document_uploaded', details: `File: ${file.name} (${(file.size/1024).toFixed(1)} KB)`, timestamp: new Date().toISOString() }) });
+      showToast(`"${file.name}" uploaded successfully`, 'success');
+      setForm({ name: '', description: '', category: 'General', uploadedBy: '' });
+      setShowForm(false);
+      refresh();
+    } catch (err: any) {
+      showToast('Upload failed: ' + err.message, 'error');
+    } finally {
+      setUploading(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleSaveMeta = async (e: any) => {
+    e.preventDefault();
+    if (!editingId) return;
+    try {
+      await apiFetch(`/documents/${editingId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ name: form.name, description: form.description, category: form.category, uploadedBy: form.uploadedBy })
+      });
+      showToast('Document details updated', 'success');
+      setEditingId(null);
+      setForm({ name: '', description: '', category: 'General', uploadedBy: '' });
+      refresh();
+    } catch (err: any) { showToast(err.message, 'error'); }
+  };
+
+  const startEdit = (doc: any) => {
+    setForm({ name: doc.name || '', description: doc.description || '', category: doc.category || 'General', uploadedBy: doc.uploadedBy || '' });
+    setEditingId(doc.id);
+  };
+
+  const handleDelete = async (doc: any) => {
+    if (!confirm(`Permanently delete "${doc.name}"?`)) return;
+    try {
+      await apiFetch(`/documents/${doc.id}`, { method: 'DELETE' });
+      showToast(`"${doc.name}" deleted`, 'success');
+      refresh();
+    } catch (err: any) { showToast(err.message, 'error'); }
+  };
+
+  const handleDownload = (doc: any) => {
+    if (!doc.url) { showToast('No file data available', 'error'); return; }
+    const a = document.createElement('a');
+    a.href = doc.url;
+    a.download = doc.name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  const filtered = (documents || []).filter((d: any) => {
+    if (filter === 'All') return true;
+    return d.category === filter;
+  }).sort((a: any, b: any) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
+
+  const formatSize = (bytes: number) => {
+    if (!bytes) return '—';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  };
+
+  const fileIcon = (type: string) => {
+    if (!type) return File;
+    if (type.includes('pdf')) return FileText;
+    if (type.includes('image')) return ImageIcon;
+    if (type.includes('word') || type.includes('document')) return FileText;
+    if (type.includes('sheet') || type.includes('excel')) return Table;
+    if (type.includes('presentation') || type.includes('powerpoint')) return Monitor;
+    return File;
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-100 flex items-center gap-3"><Folder className="w-6 h-6 text-indigo-400" /> Document Repository</h1>
+          <p className="text-sm text-slate-500 mt-1">Upload, manage, and download church documents — sermons, reports, certificates, and more</p>
+        </div>
+        <Button icon={Upload} variant="primary" onClick={() => setShowForm(!showForm)}>{showForm ? 'Close Upload' : 'Upload Document'}</Button>
+      </div>
+
+      {/* Upload Section */}
+      {showForm && (
+        <Card className="border-indigo-800/40 bg-indigo-950/10">
+          <CardHeader><h3 className="text-sm font-semibold flex items-center gap-2"><Upload className="w-4 h-4 text-indigo-400" /> Upload New Document</h3></CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <Select label="Category" options={categories} value={form.category} onChange={(e: any) => setForm({ ...form, category: e.target.value })} />
+              <Input label="Description" value={form.description} onChange={(e: any) => setForm({ ...form, description: e.target.value })} placeholder="Brief description..." />
+              <Input label="Uploaded By" value={form.uploadedBy} onChange={(e: any) => setForm({ ...form, uploadedBy: e.target.value })} placeholder="Your name" />
+              <div className="flex items-end">
+                <label className={`w-full cursor-pointer inline-flex items-center justify-center gap-2 font-medium rounded-lg transition-all duration-150 px-4 py-2 text-sm ${uploading ? 'bg-slate-700 text-slate-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-900/30'}`}>
+                  <Upload className="w-4 h-4" />
+                  {uploading ? 'Uploading...' : 'Choose File'}
+                  <input type="file" className="hidden" onChange={handleUpload} disabled={uploading} accept="*/*" />
+                </label>
+              </div>
+            </div>
+            <p className="text-xs text-slate-500">Supported: PDF, DOC, DOCX, XLS, XLSX, PPT, PPTX, JPG, PNG, TXT, and more. Maximum file size: 10MB.</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Edit Form */}
+      {editingId && (
+        <Card className="border-amber-700/40 bg-amber-950/10">
+          <CardHeader><h3 className="text-sm font-semibold">Edit Document Details</h3></CardHeader>
+          <CardContent>
+            <form onSubmit={handleSaveMeta} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <Input label="Document Name" value={form.name} onChange={(e: any) => setForm({ ...form, name: e.target.value })} required />
+              <Input label="Description" value={form.description} onChange={(e: any) => setForm({ ...form, description: e.target.value })} />
+              <Select label="Category" options={categories} value={form.category} onChange={(e: any) => setForm({ ...form, category: e.target.value })} />
+              <div className="flex items-end gap-2">
+                <Button type="button" variant="ghost" onClick={() => { setEditingId(null); setForm({ name: '', description: '', category: 'General', uploadedBy: '' }); }}>Cancel</Button>
+                <Button type="submit" icon={Save}>Save</Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Filter Bar */}
+      <div className="flex flex-wrap gap-2">
+        <button onClick={() => setFilter('All')} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${filter === 'All' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-slate-200'}`}>All ({documents?.length || 0})</button>
+        {categories.map((cat: string) => {
+          const count = (documents || []).filter((d: any) => d.category === cat).length;
+          if (count === 0) return null;
+          return <button key={cat} onClick={() => setFilter(cat)} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${filter === cat ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-slate-200'}`}>{cat} ({count})</button>;
+        })}
+      </div>
+
+      {/* Document Cards Grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        {filtered.length > 0 ? filtered.map((doc: any) => {
+          const IconComp = fileIcon(doc.type);
+          return (
+            <Card key={doc.id} className="hover:border-slate-700 transition group">
+              <CardContent className="space-y-3">
+                <div className="flex items-start justify-between">
+                  <div className="p-2.5 bg-indigo-900/20 rounded-xl">
+                    <IconComp className="w-6 h-6 text-indigo-400" />
+                  </div>
+                  <Badge variant="info" className="text-[10px]">{doc.category || 'General'}</Badge>
+                </div>
+                <div>
+                  <h4 className="text-sm font-semibold text-slate-200 truncate" title={doc.name}>{doc.name}</h4>
+                  {doc.description && <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{doc.description}</p>}
+                </div>
+                <div className="flex items-center justify-between text-[10px] text-slate-500">
+                  <span>{formatSize(doc.size)}</span>
+                  <span>{doc.uploadedAt ? new Date(doc.uploadedAt).toLocaleDateString() : '—'}</span>
+                </div>
+                {doc.uploadedBy && <p className="text-[10px] text-slate-600">By: {doc.uploadedBy}</p>}
+                <div className="flex gap-2 pt-2 border-t border-slate-800/40">
+                  <Button size="xs" variant="secondary" icon={Download} onClick={() => handleDownload(doc)}>Download</Button>
+                  <Button size="xs" variant="ghost" icon={Edit3} onClick={() => startEdit(doc)}>Edit</Button>
+                  <Button size="xs" variant="danger" icon={Trash2} onClick={() => handleDelete(doc)}>Delete</Button>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        }) : (
+          <div className="col-span-full py-16 text-center text-slate-600">
+            <FolderOpen className="w-16 h-16 mx-auto mb-4 text-slate-700" />
+            <p className="text-base font-medium text-slate-400">No documents yet</p>
+            <p className="text-xs text-slate-500 mt-1">Click "Upload Document" to add sermon notes, reports, certificates, or any church files</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 function AuditLogPage(){ const {db}=useApp(); return <div className="space-y-6"><h1 className="text-2xl font-bold flex items-center gap-2"><Shield className="w-6 h-6 text-indigo-400"/>Audit Log</h1><Card><CardContent><div className="space-y-2">{db.auditLogs.map((a:any,i:number)=><div key={i} className="text-sm py-2 border-b border-slate-800/40"><span className="font-medium">{a.action}</span> <span className="text-slate-500">- {a.details}</span> <span className="text-xs text-slate-600 float-right">{a.timestamp ? new Date(a.timestamp).toLocaleString() : ''}</span></div>)}</div></CardContent></Card></div>; }
 
 // ─── QUARTERLY REPORTS PAGE ────────────────────────────────────────────────
